@@ -5509,7 +5509,13 @@ namespace Models.Soils
 
         /// <summary>CL leached from the bottom of the profile.</summary>
         public double LeachCl => TD_soldrain[SoluteIndex("Cl")];
-
+		
+        /// <summary>Na leached from the bottom of the profile.</summary>
+        public double LeachNa => TD_soldrain[SoluteIndex("Na")];
+		
+        /// <summary>Ca leached from the bottom of the profile.</summary>
+        public double LeachCa => TD_soldrain[SoluteIndex("Ca")];
+		
         /// <summary>Amount of NO3 not adsorbed (ppm).</summary>
         public double[] ConcWaterNO3 => ConcWaterSolute(SoluteIndex("NO3"));
 
@@ -5521,6 +5527,18 @@ namespace Models.Soils
 
         /// <summary>Amount of CL not adsorbed (ppm).</summary>
         public double[] ConcWaterCl => ConcWaterSolute(SoluteIndex("Cl"));
+		
+		/// <summary>Amount of Na not adsorbed (ppm).</summary>
+        public double[] ConcWaterNa => ConcWaterSolute(SoluteIndex("Na"));
+		
+		/// <summary>Amount of Ca not adsorbed (ppm).</summary>
+        public double[] ConcWaterCa => ConcWaterSolute(SoluteIndex("Ca"));
+		
+		/// <summary>Amount of Na adsorbed (ppm).</summary>
+        public double[] ConcAdsorbNa => ConcAdsorbSolute(SoluteIndex("Na"));
+		
+		/// <summary>Amount of Ca adsorbed (ppm).</summary>
+        public double[] ConcAdsorbCa => ConcAdsorbSolute(SoluteIndex("Ca"));
 
         /// <summary>Amount of water moving downward out of each soil layer due to gravity drainage (above DUL) (mm)</summary>
         [JsonIgnore]
