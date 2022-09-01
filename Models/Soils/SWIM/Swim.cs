@@ -5533,6 +5533,9 @@ namespace Models.Soils
 		
 		/// <summary>Amount of Ca not adsorbed (ppm).</summary>
         public double[] ConcWaterCa => ConcWaterSolute(SoluteIndex("Ca"));
+
+		/// <summary>Amount of Cl adsorbed (ppm).</summary>
+        public double[] ConcAdsorbCl => ConcAdsorbSolute(SoluteIndex("Cl"));
 		
 		/// <summary>Amount of Na adsorbed (ppm).</summary>
         public double[] ConcAdsorbNa => ConcAdsorbSolute(SoluteIndex("Na"));
