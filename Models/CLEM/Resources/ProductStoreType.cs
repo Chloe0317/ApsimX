@@ -1,12 +1,9 @@
-﻿using Models.Core;
+﻿using Models.CLEM.Interfaces;
+using Models.Core;
 using Models.Core.Attributes;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace Models.CLEM.Resources
 {
@@ -14,10 +11,10 @@ namespace Models.CLEM.Resources
     /// Store for emission type
     ///</summary> 
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(ProductStore))]
-    [Description("This resource represents a product store type (e.g. Cotton).")]
+    [Description("This resource represents a product store (e.g. cotton)")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Resources/Products/ProductStoreType.htm")]
     public class ProductStoreType : CLEMResourceTypeBase, IResourceType, IResourceWithTransactionType
@@ -51,32 +48,21 @@ namespace Models.CLEM.Resources
         {
             this.amount = 0;
             if (StartingAmount > 0)
+                Add(StartingAmount, null, null, "Starting value");
+        }
+
+        /// <summary>
+        /// Total value of resource
+        /// </summary>
+        public double? Value
+        {
+            get
             {
-                Add(StartingAmount, this, "", "Starting value");
+                return Price(PurchaseOrSalePricingStyleType.Sale)?.CalculateValue(Amount);
             }
         }
 
         #region transactions
-
-        /// <summary>
-        /// Resource transaction occured
-        /// </summary>
-        public event EventHandler TransactionOccurred;
-
-        /// <summary>
-        /// Transcation occurred 
-        /// </summary>
-        /// <param name = "e" >args</param>
-        protected virtual void OnTransactionOccurred(EventArgs e)
-        {
-            TransactionOccurred?.Invoke(this, e);
-        }
-
-        /// <summary>
-        /// Last transaction received
-        /// </summary>
-        [JsonIgnore]
-        public ResourceTransaction LastTransaction { get; set; }
 
         /// <summary>
         /// Add product to store
@@ -87,36 +73,24 @@ namespace Models.CLEM.Resources
         /// <param name="category"></param>
         public new void Add(object resourceAmount, CLEMModel activity, string relatesToResource, string category)
         {
-            double addAmount;
-            if (resourceAmount.GetType().Name == "FoodResourcePacket")
+            double amountAdded;
+            switch (resourceAmount)
             {
-                addAmount = (resourceAmount as FoodResourcePacket).Amount;
-            }
-            else if (resourceAmount.GetType().ToString() == "System.Double")
-            {
-                addAmount = (double)resourceAmount;
-            }
-            else
-            {
-                throw new Exception(String.Format("ResourceAmount object of type [{0}] is not supported in [r={1}]", resourceAmount.GetType().ToString(), this.Name));
+                case FoodResourcePacket _:
+                    amountAdded = (resourceAmount as FoodResourcePacket).Amount;
+                    break;
+                case double _:
+                    amountAdded = (double)resourceAmount;
+                    break;
+                default:
+                    throw new Exception($"ResourceAmount object of type [{resourceAmount.GetType().Name}] is not supported in [r={Name}]");
             }
 
-            if (addAmount > 0)
+            if (amountAdded > 0)
             {
-                amount += addAmount;
+                amount += amountAdded;
 
-                ResourceTransaction details = new ResourceTransaction
-                {
-                    Gain = addAmount,
-                    Activity = activity,
-                    RelatesToResource = relatesToResource,
-                    Category = category,
-                    ResourceType = this
-                };
-                base.LastGain = addAmount;
-                LastTransaction = details;
-                TransactionEventArgs te = new TransactionEventArgs() { Transaction = details };
-                OnTransactionOccurred(te);
+                ReportTransaction(TransactionType.Gain, amountAdded, activity, relatesToResource, category, this);
             }
         }
 
@@ -127,15 +101,11 @@ namespace Models.CLEM.Resources
         public new void Remove(ResourceRequest request)
         {
             if (request.Required == 0)
-            {
                 return;
-            }
 
             // if this request aims to trade with a market see if we need to set up details for the first time
             if (request.MarketTransactionMultiplier > 0)
-            {
                 FindEquivalentMarketStore();
-            }
 
             // avoid taking too much
             double amountRemoved = request.Required;
@@ -144,24 +114,12 @@ namespace Models.CLEM.Resources
 
             // send to market if needed
             if (request.MarketTransactionMultiplier > 0 && EquivalentMarketStore != null)
-            {
                 (EquivalentMarketStore as ProductStoreType).Add(amountRemoved * request.MarketTransactionMultiplier, request.ActivityModel, this.NameWithParent, "Farm sales");
-            }
 
             request.Provided = amountRemoved;
             if (amountRemoved > 0)
             {
-                ResourceTransaction details = new ResourceTransaction
-                {
-                    ResourceType = this,
-                    Loss = amountRemoved,
-                    Activity = request.ActivityModel,
-                    Category = request.Category,
-                    RelatesToResource = request.RelatesToResource
-                };
-                LastTransaction = details;
-                TransactionEventArgs te = new TransactionEventArgs() { Transaction = details };
-                OnTransactionOccurred(te);
+                ReportTransaction(TransactionType.Loss, amountRemoved, request.ActivityModel, request.RelatesToResource, request.Category, this);
             }
         }
 
@@ -178,20 +136,14 @@ namespace Models.CLEM.Resources
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
-            string html = base.ModelSummary(formatForParentControl);
+            string html = base.ModelSummary();
 
             html += "\r\n<div class=\"activityentry\">";
             if (StartingAmount > 0)
-            {
                 html += "There is <span class=\"setvalue\">" + this.StartingAmount.ToString("#.###") + "</span> at the start of the simulation.";
-            }
             html += "\r\n</div>";
             return html;
         }

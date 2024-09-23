@@ -1,32 +1,32 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Core.Run;
+using Models.Factorial;
+using Models.Interfaces;
+using Models.Sensitivity;
+using Models.Storage;
+using Models.Utilities;
+using Newtonsoft.Json;
+
+namespace Models
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Core.Run;
-    using Models.Factorial;
-    using Models.Interfaces;
-    using Models.Sensitivity;
-    using Models.Storage;
-    using Newtonsoft.Json;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.IO;
-    using System.Linq;
-    using System.Text;
-    using Utilities;
 
     /// <summary>
-    /// # [Name]
     /// Encapsulates a Morris analysis.
     /// </summary>
     [Serializable]
     [ViewName("UserInterface.Views.PropertyAndGridView")]
-    [PresenterName("UserInterface.Presenters.PropertyAndTablePresenter")]
+    [PresenterName("UserInterface.Presenters.PropertyAndGridPresenter")]
     [ValidParent(ParentType = typeof(Simulations))]
     [ValidParent(ParentType = typeof(Folder))]
-    public class Morris : Model, ISimulationDescriptionGenerator, ICustomDocumentation, IModelAsTable, IPostSimulationTool
+    public class Morris : Model, ISimulationDescriptionGenerator, IPostSimulationTool
     {
         [Link]
         private IDataStore dataStore = null;
@@ -97,6 +97,7 @@
         /// <remarks>
         /// Needs to be public so that it gets written to .apsimx file
         /// </remarks>
+        [Display]
         public List<Parameter> Parameters { get; set; }
 
         /// <summary>
@@ -124,59 +125,8 @@
             allCombinations = new List<List<CompositeFactor>>();
         }
 
-        /// <summary>
-        /// Gets or sets the table of values.
-        /// </summary>
-        [JsonIgnore]
-        public List<DataTable> Tables
-        {
-            get
-            {
-                List<DataTable> tables = new List<DataTable>();
-
-                // Add a parameter table
-                DataTable table = new DataTable();
-                table.Columns.Add("Name", typeof(string));
-                table.Columns.Add("Path", typeof(string));
-                table.Columns.Add("LowerBound", typeof(double));
-                table.Columns.Add("UpperBound", typeof(double));
-
-                foreach (Parameter param in Parameters)
-                {
-                    DataRow row = table.NewRow();
-                    row["Name"] = param.Name;
-                    row["Path"] = param.Path;
-                    row["LowerBound"] = param.LowerBound;
-                    row["UpperBound"] = param.UpperBound;
-                    table.Rows.Add(row);
-                }
-                tables.Add(table);
-
-                return tables;
-            }
-            set
-            {
-                ParametersHaveChanged = true;
-                Parameters.Clear();
-                foreach (DataRow row in value[0].Rows)
-                {
-                    Parameter param = new Parameter();
-                    if (!Convert.IsDBNull(row["Name"]))
-                        param.Name = row["Name"].ToString();
-                    if (!Convert.IsDBNull(row["Path"]))
-                        param.Path = row["Path"].ToString();
-                    if (!Convert.IsDBNull(row["LowerBound"]))
-                        param.LowerBound = Convert.ToDouble(row["LowerBound"], CultureInfo.InvariantCulture);
-                    if (!Convert.IsDBNull(row["UpperBound"]))
-                        param.UpperBound = Convert.ToDouble(row["UpperBound"], CultureInfo.InvariantCulture);
-                    if (param.Name != null || param.Path != null)
-                        Parameters.Add(param);
-                }
-            }
-        }
-
         /// <summary>Have the values of the parameters changed?</summary>
-        public bool ParametersHaveChanged { get; set; }  = false;
+        public bool ParametersHaveChanged { get; set; } = false;
 
         /// <summary>Gets a list of simulation descriptions.</summary>
         public List<SimulationDescription> GenerateSimulationDescriptions()
@@ -311,7 +261,7 @@
             if (dataStore?.Writer != null && !dataStore.Writer.TablesModified.Contains(TableName))
                 return;
 
-            DataTable predictedData = dataStore.Reader.GetData(TableName, filter: "SimulationName LIKE '" + Name + "%'", orderBy: "SimulationID");
+            DataTable predictedData = dataStore.Reader.GetData(TableName);
             if (predictedData != null)
             {
 
@@ -545,25 +495,6 @@
         private string GetTempFileName(string name, string extension)
         {
             return Path.ChangeExtension(Path.Combine(Path.GetTempPath(), name + id), extension);
-        }
-
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        /// <param name="tags">The list of tags to add to.</param>
-        /// <param name="headingLevel">The level (e.g. H2) of the headings.</param>
-        /// <param name="indent">The level of indentation 1, 2, 3 etc.</param>
-        public void Document(List<AutoDocumentation.ITag> tags, int headingLevel, int indent)
-        {
-            if (IncludeInDocumentation)
-            {
-                // add a heading.
-                tags.Add(new AutoDocumentation.Heading(Name, headingLevel));
-
-                foreach (IModel child in Children)
-                {
-                    if (!(child is Simulation) && !(child is Factors))
-                        AutoDocumentation.DocumentModel(child, tags, headingLevel + 1, indent);
-                }
-            }
         }
     }
 }

@@ -1,11 +1,8 @@
-﻿using Models.Core;
+﻿using Models.CLEM.Interfaces;
+using Models.Core;
 using Models.Core.Attributes;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System;
 
 namespace Models.CLEM.Resources
 {
@@ -13,17 +10,22 @@ namespace Models.CLEM.Resources
     /// Base resource model to implement transaction tracking
     ///</summary> 
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [Description("This is the CLEM Resource Base Class and should not be used directly.")]
     [Version(1, 0, 1, "")]
-    public class ResourceBaseWithTransactions: CLEMModel
+    public class ResourceBaseWithTransactions : CLEMModel
     {
         /// <summary>
         /// Last transaction received
         /// </summary>
         [JsonIgnore]
-        public ResourceTransaction LastTransaction { get; set; }
+        public ResourceTransaction LastTransaction { get; set; } = new ResourceTransaction();
+
+        /// <summary>
+        /// Provide full name of resource StoreName.TypeName
+        /// </summary>
+        public string FullName => $"{CLEMParentName}.{Name}";
 
         /// <summary>
         /// Resource transaction occured Event handler
@@ -48,19 +50,43 @@ namespace Models.CLEM.Resources
             throw new NotImplementedException();
         }
 
+        /// <summary>An event handler to allow us to initialise ourselves.</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("Commencing")]
+        protected void OnSimulationCommencing(object sender, EventArgs e)
+        {
+            foreach (IResourceWithTransactionType childModel in this.FindAllChildren<IResourceWithTransactionType>())
+                childModel.TransactionOccurred += Resource_TransactionOccurred;
+        }
+
+        /// <summary>
+        /// Overrides the base class method to allow for clean up
+        /// </summary>
+        [EventSubscribe("Completed")]
+        protected void OnSimulationCompleted(object sender, EventArgs e)
+        {
+            foreach (IResourceWithTransactionType childModel in this.FindAllChildren<IResourceWithTransactionType>())
+                childModel.TransactionOccurred -= Resource_TransactionOccurred;
+        }
+
         /// <summary>
         /// 
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Resource_TransactionOccurred(object sender, EventArgs e)
+        protected void Resource_TransactionOccurred(object sender, EventArgs e)
         {
-            throw new NotImplementedException();
+            OnTransactionOccurred(e);
         }
 
         /// <summary>
-        /// Provie full name of resource StoreName.TypeName
+        /// Handles reporting transactions
         /// </summary>
-        public string FullName => $"{CLEMParentName}.{Name}";
+        public void PerformTransactionOccurred()
+        {
+            TransactionOccurred?.Invoke(this, null);
+        }
+
     }
 }

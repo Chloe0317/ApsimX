@@ -1,17 +1,15 @@
-﻿using Models.Core;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using APSIM.Shared.Documentation;
+using Models.Core;
 
 namespace Models.Functions
 {
     /// <summary>
-    /// [DocumentType Memo]
-    /// <i>[Name]</i> is calculated using linear interpolation.
-    /// [DocumentChart XYPairs, ,[XVariableName],[Name]]
-    /// [DontDocument XValue]
+    /// A linear interpolation model.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [Description("A Y value is returned for the current vaule of the XValue child via linear interpolation of the XY pairs specified")]
     public class LinearInterpolationFunction : Model, IFunction
@@ -33,12 +31,12 @@ namespace Models.Functions
         public LinearInterpolationFunction() { }
 
         /// <summary>Constructor</summary>
-        public LinearInterpolationFunction(double[] x, double[] y) 
+        public LinearInterpolationFunction(double[] x, double[] y)
         {
             XYPairs = new XYPairs() { X = x, Y = y };
         }
 
-        /// <summary>Return the name of the x variable. Used as graph x axis title.summary>
+        /// <summary>Return the name of the x variable. Used as graph x axis title.</summary>
         public string XVariableName
         {
             get
@@ -68,6 +66,7 @@ namespace Models.Functions
         /// <summary>Called when model has been created.</summary>
         public override void OnCreated()
         {
+            base.OnCreated();
             if (XYPairs != null)
             {
                 for (int i = 1; i < XYPairs.Y.Length; i++)
@@ -107,6 +106,23 @@ namespace Models.Functions
         public double ValueForX(double XValue)
         {
             return XYPairs.ValueIndexed(XValue);
+        }
+
+        /// <summary>
+        /// Document the model.
+        /// </summary>
+        public override IEnumerable<ITag> Document()
+        {
+            XYPairs.XVariableName = "XValue";
+            var xValue = XYPairs.Parent.FindChild("XValue");
+            if (xValue is VariableReference)
+                XYPairs.XVariableName = (xValue as VariableReference).VariableName;
+
+            // fixme - the graph and table should be next to each other.
+            yield return new Paragraph($"*{Name}* is calculated using linear interpolation");
+
+            foreach (var tag in XYPairs.Document())
+                yield return tag;
         }
     }
 }

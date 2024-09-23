@@ -1,10 +1,7 @@
-﻿using APSIM.Shared.Utilities;
-using Models.Core;
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using APSIM.Shared.Utilities;
+using Models.Core;
 
 namespace Models.Functions
 {
@@ -18,7 +15,7 @@ namespace Models.Functions
     /// in old apsim which return 10 if the denominator is 0 or 0 if
     /// the numerator is 0.
     /// </remarks>
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [Serializable]
     public class ProtectedDivideFunction : Model, IFunction

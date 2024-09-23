@@ -1,29 +1,29 @@
-﻿namespace Models.LifeCycle
+﻿using System;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Functions;
+using static Models.LifeCycle.LifeCyclePhase;
+
+namespace Models.LifeCycle
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Functions;
-    using System;
-    using System.Collections.Generic;
-    using static Models.LifeCycle.LifeCyclePhase;
 
     /// <summary>
-    /// Sets and infestation event for Lifecycle model.  
+    /// Sets and infestation event for Lifecycle model.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(Zone))]
     public class Infestation : Model, IInfest
     {
         /// <summary> Clock </summary>
         [Link]
-        public Clock Clock = null;
+        public IClock Clock = null;
 
         /// <summary>Sets the type of infestation event</summary>
         [Description("Select the type of infestation event")]
         public InfestationType TypeOfInfestation { get; set; }
-        
+
         /// <summary>Options for types of infestation</summary>
         public enum InfestationType
         {
@@ -89,7 +89,7 @@
         }
 
         /// <summary>At the start of the simulation find the infesting lifecycle and phase</summary>
-        /// <param name="sender"></param> 
+        /// <param name="sender"></param>
         /// <param name="e"></param>
         [EventSubscribe("StartOfSimulation")]
         private void OnStartOfSimulation(object sender, EventArgs e)
@@ -113,7 +113,7 @@
             }
             else if (TypeOfInfestation == InfestationType.OnDate)
             {
-                if (DateUtilities.DatesEqual(InfestationDate, Clock.Today))
+                if (DateUtilities.DayMonthIsEqual(InfestationDate, Clock.Today))
                     Infest();
                 return;
             }

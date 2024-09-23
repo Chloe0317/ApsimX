@@ -1,6 +1,4 @@
-using DocumentFormat.OpenXml.EMMA;
 using Gtk;
-using Models.CLEM;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,43 +13,23 @@ using UserInterface.Views;
 namespace UserInterface.Views
 {
     //duplicate of InputView because we want to place this at the top of our simulation not onto the Datastore
-    interface ICLEMView
-    {
-        /// <summary>
-        /// Adds a new tab view to the display
-        /// </summary>
-        /// <param name="tabName"></param>
-        /// <param name="control"></param>
-        void AddTabView(string tabName, object control);
-
-        /// <summary>
-        /// selects the tab view to the display
-        /// </summary>
-        /// <param name="tabName"></param>
-        void SelectTabView(string tabName);
-
-        /// <summary>Invoked when tab is selected</summary>
-        event EventHandler<EventArgs> TabSelected;
-    }
 
     public class CLEMView : ViewBase, Views.ICLEMView
     {
         private Notebook nbook = null;
-
         private Dictionary<string, Label> labelDictionary = new Dictionary<string, Label>();
         private Dictionary<string, Viewport> viewportDictionary = new Dictionary<string, Viewport>();
+        private bool setupComplete = false;
+        private string previousTabLabel = "";
 
         /// <summary>Invoked when tab selected</summary>
         public event EventHandler<EventArgs> TabSelected;
-
-        private bool setupComplete = false;
 
         public CLEMView(ViewBase owner) : base(owner)
         {
             nbook = new Notebook();
             nbook.SwitchPage += NotebookSwitchPage;
             nbook.CurrentPage = 0;
-
             mainWidget = nbook;
             setupComplete = true;
         }
@@ -64,17 +42,17 @@ namespace UserInterface.Views
                 {
                     string selectedLabel = nbook.GetTabLabelText(nbook.GetNthPage(nbook.CurrentPage));
                     TabChangedEventArgs  tabEArgs = new TabChangedEventArgs(selectedLabel);
-                    if (TabSelected != null)
+                    if (TabSelected != null && selectedLabel != previousTabLabel)
                     {
                         TabSelected.Invoke(this, tabEArgs);
                     }
+                    previousTabLabel = selectedLabel;
                 }
             }
             catch (Exception err)
             {
                 ShowError(err);
             }
-
         }
 
         /// <summary>
@@ -101,7 +79,7 @@ namespace UserInterface.Views
 
         public void AddTabView(string tabName, object control)
         {
-            if(labelDictionary.ContainsKey(tabName))
+            if (labelDictionary.ContainsKey(tabName))
             {
                 return;
             }
@@ -121,7 +99,7 @@ namespace UserInterface.Views
             viewportDictionary.Add(tabName, newViewport);
             labelDictionary.Add(tabName, newLabel);
 
-            if (nbook.GetTabLabelText(newViewport) == null)
+            if (!nbook.Children.Contains(newViewport))
             {
                 nbook.AppendPage(newViewport, newLabel);
             }
@@ -129,33 +107,18 @@ namespace UserInterface.Views
             foreach (Widget child in newViewport.Children)
             {
                 newViewport.Remove(child);
-                child.Cleanup();
+                child.Dispose();
             }
             if (typeof(ViewBase).IsInstanceOfType(control))
             {
                 EventBox frame = new EventBox();
-#if NETFRAMEWORK
-                frame.ModifyBg(StateType.Normal, mainWidget.Style.Base(StateType.Normal));
-#endif
-                HBox hbox = new HBox();
-                uint border = 0;
-                if (tabName != "Properties" & tabName != "Display" & tabName != "Data")
-                {
-                    border = 10;
-                }
 
-                hbox.BorderWidth = border;
+                Box hbox = new Box(Orientation.Horizontal, 0);
 
                 ViewBase view = (ViewBase)control;
 
-                //if (view is ActivityLedgerGridView)
-                //{
-                //    hbox.Add(view.MainWidget);
-                //}
-                //else
-                //{
-                    hbox.Add(view.MainWidget);
-                //}
+                hbox.Add(view.MainWidget);
+                view.MainWidget.Expand = true;
                 frame.Add(hbox);
                 newViewport.Add(frame);
 
@@ -164,13 +127,22 @@ namespace UserInterface.Views
         }
     }
 
-    public class TabChangedEventArgs : EventArgs
+    interface ICLEMView
     {
-        public string TabName { get; set; }
+        /// <summary>
+        /// Adds a new tab view to the display
+        /// </summary>
+        /// <param name="tabName"></param>
+        /// <param name="control"></param>
+        void AddTabView(string tabName, object control);
 
-        public TabChangedEventArgs(string myString)
-        {
-            this.TabName = myString;
-        }
+        /// <summary>
+        /// selects the tab view to the display
+        /// </summary>
+        /// <param name="tabName"></param>
+        void SelectTabView(string tabName);
+
+        /// <summary>Invoked when tab is selected</summary>
+        event EventHandler<EventArgs> TabSelected;
     }
 }

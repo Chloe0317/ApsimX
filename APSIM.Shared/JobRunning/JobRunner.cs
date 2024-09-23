@@ -1,11 +1,11 @@
-﻿namespace APSIM.Shared.JobRunning
-{
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using System.Threading;
-    using System.Threading.Tasks;
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Threading;
+using System.Threading.Tasks;
 
+namespace APSIM.Shared.JobRunning
+{
     /// <summary>
     /// The class encapsulates the ability to run multiple collections of IRunnable jobs.
     /// Multiple JobManager instances can be added, each managing a collection of jobs.
@@ -31,7 +31,8 @@
         /// A list of jobs current running. 
         /// We keep track of this to allow us to query how much of each job has been completed
         /// </summary>
-        public List<IRunnable> SimsRunning { get; private set; } = new List<IRunnable>();
+        /// <remarks>Using ImmutableList here for thread safety.</remarks>
+        public ImmutableList<IRunnable> SimsRunning { get; private set; } = ImmutableList<IRunnable>.Empty;
 
         /// <summary>
         /// Lock object controlling access to SimsRunning list
@@ -77,7 +78,7 @@
 
         /// <summary>Add a jobmanager to the collection of jobmanagers to run.</summary>
         /// <param name="jobManager">The job manager to add.</param>
-        public void Add(IJobManager jobManager)
+        public virtual void Add(IJobManager jobManager)
         {
             jobManagers.Add(jobManager);
         }
@@ -87,7 +88,8 @@
         public void Run(bool wait = false)
         {
             startTime = DateTime.Now;
-            cancelToken = new CancellationTokenSource();
+                cancelToken = new CancellationTokenSource();
+            completed = false;
 
             if (numberOfProcessors == 1 && wait)
                 WorkerThread();
@@ -107,6 +109,8 @@
             if (numberJobsRunning > 0)
             {
                 cancelToken.Cancel();
+                foreach (var sim in SimsRunning)
+                    sim.Cleanup(cancelToken);
                 SpinWait.SpinUntil(() => numberJobsRunning == 0);
             }
         }
@@ -119,26 +123,22 @@
                 bool multiThreaded = numberOfProcessors > 1;
                 try
                 {
-                    foreach (var jobManager in jobManagers)
+                    foreach (var (job, jobManager) in GetJobs())
                     {
-                        var jobs = jobManager.GetJobs();
-                        foreach (var job in jobs)
-                        {
-                            if (cancelToken.IsCancellationRequested)
-                                return;
+                        if (cancelToken.IsCancellationRequested)
+                            break;
 
-                            // Wait until we have a spare processor to run a job.
-                            if (multiThreaded)
-                                SpinWait.SpinUntil(() => numberJobsRunning <= numberOfProcessors);
+                        // Wait until we have a spare processor to run a job.
+                        if (multiThreaded)
+                            SpinWait.SpinUntil(() => numberJobsRunning <= numberOfProcessors);
 
-                            // Run the job.
-                            Interlocked.Increment(ref numberJobsRunning);
+                        // Run the job.
+                        Interlocked.Increment(ref numberJobsRunning);
 
-                            if (multiThreaded)
-                                Task.Run(() => { RunActualJob(job, jobManager); });
-                            else
-                                RunActualJob(job, jobManager);
-                        }
+                        if (multiThreaded)
+                            Task.Run(() => { RunActualJob(job, jobManager); });
+                        else
+                            RunActualJob(job, jobManager);
                     }
                 }
                 catch (Exception err)
@@ -157,47 +157,79 @@
             }
         }
 
+        /// <summary>
+        /// Get all jobs to be run.
+        /// </summary>
+        protected virtual IEnumerable<(IRunnable, IJobManager)> GetJobs()
+        {
+            foreach (IJobManager jobManager in jobManagers)
+                foreach (IRunnable job in jobManager.GetJobs())
+                    yield return (job, jobManager);
+        }
+
         /// <summary>Run the specified job.</summary>
         /// <param name="job">The job to run.</param>
         /// <param name="jobManager">The job manager owning the job.</param>
-        private void RunActualJob(IRunnable job, IJobManager jobManager)
+        protected virtual void RunActualJob(IRunnable job, IJobManager jobManager)
         {
             try
             {
                 if (!(job is JobRunnerSleepJob))
                     lock (runningLock)
                     {
-                        SimsRunning.Add(job);
+                        SimsRunning = SimsRunning.Add(job);
                     }
-
                 var startTime = DateTime.Now;
 
                 Exception error = null;
                 try
                 {
                     // Run job.
-                    job.Run(cancelToken);
+                    Prepare(job);
+                    Run(job);
+                    Cleanup(job);
                 }
                 catch (Exception err)
                 {
                     error = err;
                 }
 
-                // Signal to JobManager the job has finished.
-                InvokeJobCompleted(job, jobManager, startTime, error);
-
                 if (!(job is JobRunnerSleepJob))
+                {
+                    // Signal to JobManager the job has finished.
+                    if (jobManager.NotifyWhenJobComplete)
+                        InvokeJobCompleted(job, jobManager, startTime, error);
+
                     lock (runningLock)
                     {
                         NumJobsCompleted++;
-                        SimsRunning.Remove(job);
+                        SimsRunning = SimsRunning.Remove(job);
                     }
+                }
             }
             finally
             {
                 Interlocked.Decrement(ref numberJobsRunning);
             }
         }
+
+        /// <summary>
+        /// Prepare a job.
+        /// </summary>
+        /// <param name="job">The job to be prepared.</param>
+        protected virtual void Prepare(IRunnable job) => job.Prepare();
+
+        /// <summary>
+        /// Run a job.
+        /// </summary>
+        /// <param name="job">The job to be run.</param>
+        protected virtual void Run(IRunnable job) => job.Run(cancelToken);
+
+        /// <summary>
+        /// Cleanup a job.
+        /// </summary>
+        /// <param name="job">The job to be cleaned up.</param>
+        protected virtual void Cleanup(IRunnable job) => job.Cleanup(cancelToken);
 
         /// <summary>
         /// Invoke the job completed event.

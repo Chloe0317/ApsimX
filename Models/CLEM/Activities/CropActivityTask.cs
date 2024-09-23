@@ -1,12 +1,10 @@
-﻿using Models.Core;
-using Models.CLEM.Groupings;
+using Models.Core;
+using Models.CLEM.Interfaces;
 using Models.CLEM.Resources;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Models.Core.Attributes;
 using System.IO;
 
@@ -15,27 +13,20 @@ namespace Models.CLEM.Activities
     /// <summary>Crop activity task</summary>
     /// <summary>This activity will perform costs and labour for a crop activity</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CropActivityManageProduct))]
-    [Description("This is a crop task (e.g. sowing) with associated costs and labour requirements.")]
+    [Description("A crop task (e.g. sowing) with associated costs and labour requirements.")]
     [Version(1, 0, 2, "Added per unit of land as labour unit type")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Crop/CropTask.htm")]
-    public class CropActivityTask: CLEMActivityBase, IValidatableObject, ICategoryActivity
+    public class CropActivityTask: CLEMActivityBase, IValidatableObject, IHandlesActivityCompanionModels
     {
-        [Link]
-        Clock Clock = null;
-
-        /// <summary>
-        /// Category label to use in ledger
-        /// </summary>
-        [Description("Shortname of task for reporting")]
-        [Required(AllowEmptyStrings = false, ErrorMessage = "Shortname required")]
-        public string Category { get; set; }
-
-        private string RelatesToResourceName = "";
         private bool timingIssueReported = false;
+        private CropActivityManageCrop parentManagementActivity;
+        private CropActivityManageProduct parentManageProductActivity;
+
+        double amountToSkip = 0;
 
         /// <summary>
         /// Constructor
@@ -45,13 +36,27 @@ namespace Models.CLEM.Activities
             base.ModelSummaryStyle = HTMLSummaryStyle.SubActivity;
         }
 
-        /// <summary>
-        /// Method to determine resources required for this activity in the current month
-        /// </summary>
-        /// <returns>List of required resource requests</returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
         {
-            return null;
+            switch (type)
+            {
+                case "ActivityFee":
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>(),
+                        measures: new List<string>() {
+                            "fixed",
+                            "per land unit of crop",
+                            "per hectare of crop",
+                            "per kg harvested",
+                            "per land unit harvested",
+                            "per hectare harvested",
+                        }
+                        );
+                default:
+                    return new LabelsForCompanionModels();
+            }
         }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
@@ -60,160 +65,91 @@ namespace Models.CLEM.Activities
         [EventSubscribe("CLEMInitialiseActivity")]
         private void OnCLEMInitialiseActivity(object sender, EventArgs e)
         {
-            RelatesToResourceName = this.FindAncestor<CropActivityManageProduct>().StoreItemName;
+            //relatesToResourceName = this.FindAncestor<CropActivityManageProduct>().StoreItemName;
+            parentManagementActivity = FindAncestor<CropActivityManageCrop>();
+            parentManageProductActivity = (Parent as CropActivityManageProduct);
         }
 
-        /// <summary>An event handler to allow to call all Activities in tree to request their resources in order.</summary>
-        /// <param name="sender">The sender.</param>
-        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
-        [EventSubscribe("CLEMGetResourcesRequired")]
-        private void OnGetResourcesRequired(object sender, EventArgs e)
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
-            // if first step of parent rotation
-            // and timer failed because of harvest data
-            int start = FindAncestor<CropActivityManageProduct>().FirstTimeStepOfRotation;
-            if (Clock.Today.Year * 100 + Clock.Today.Month == start)
+            amountToSkip = 0;
+            if (TimingOK)
             {
-                // check if it can only occur before this rotation started
-                ActivityTimerCropHarvest chtimer = this.FindAllChildren<ActivityTimerCropHarvest>().FirstOrDefault() as ActivityTimerCropHarvest;
-                if (chtimer != null)
+                if (FindAncestor<CropActivityManageProduct>().CurrentlyManaged)
+                    Status = ActivityStatus.Success;
+                else
                 {
-                    if (chtimer.ActivityPast)
+                    Status = ActivityStatus.Warning;
+                    foreach (var child in FindAllChildren<CLEMActivityBase>())
                     {
-                        this.Status = ActivityStatus.Warning;
-                        if (!timingIssueReported)
-                        {
-                            Summary.WriteWarning(this, String.Format("The harvest timer for crop task [a=" + this.Name + "] did not allow the task to be performed. This is likely due to insufficient time between rotating to a crop and the next harvest date.", this.Name));
-                            timingIssueReported = true;
-                        }
+                        child.Status = ActivityStatus.Warning;
+                    }
+                    if (!timingIssueReported)
+                    {
+                        Summary.WriteMessage(this, $"The harvest timer for crop task [a={this.NameWithParent}] did not allow the task to be performed. This is likely due to insufficient time between rotating to a crop and the next harvest date.", MessageType.Warning);
+                        timingIssueReported = true;
                     }
                 }
             }
-        }
 
-        /// <summary>
-        /// Determines how much labour is required from this activity based on the requirement provided
-        /// </summary>
-        /// <param name="requirement">The details of how labour are to be provided</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
-        {
-            double numberUnits;
-            double daysNeeded;
-            switch (requirement.UnitType)
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
             {
-                case LabourUnitType.Fixed:
-                    daysNeeded = requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perUnitOfLand:
-                    CropActivityManageCrop cropParent = FindAncestor<CropActivityManageCrop>();
-                    numberUnits = cropParent.Area;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perHa:
-                    cropParent = FindAncestor<CropActivityManageCrop>();
-                    CropActivityManageProduct productParent = FindAncestor<CropActivityManageProduct>();
-                    numberUnits = cropParent.Area * productParent.UnitsToHaConverter / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perTree:
-                    cropParent = FindAncestor<CropActivityManageCrop>();
-                    productParent = FindAncestor<CropActivityManageProduct>();
-                    numberUnits = productParent.TreesPerHa * cropParent.Area * productParent.UnitsToHaConverter / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perKg:
-                    productParent = FindAncestor<CropActivityManageProduct>();
-                    numberUnits = productParent.AmountHarvested;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perUnit:
-                    productParent = FindAncestor<CropActivityManageProduct>();
-                    numberUnits = productParent.AmountHarvested / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                default:
-                    throw new Exception(String.Format("LabourUnitType {0} is not supported for {1} in {2}", requirement.UnitType, requirement.Name, this.Name));
+                switch (valueToSupply.Key.unit)
+                {
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
+                        break;
+                    case "per land unit of crop":
+                        valuesForCompanionModels[valueToSupply.Key] = parentManagementActivity?.Area??0;
+                        break;
+                    case "per hectare of crop":
+                        valuesForCompanionModels[valueToSupply.Key] = (parentManagementActivity?.Area ?? 0) * parentManageProductActivity.UnitsToHaConverter;
+                        break;
+                    case "per kg harvested":
+                        valuesForCompanionModels[valueToSupply.Key] = parentManageProductActivity.AmountHarvested;
+                        break;
+                    case "per land unit harvested":
+                        if (parentManageProductActivity.AmountHarvested > 0)
+                            valuesForCompanionModels[valueToSupply.Key] = (parentManagementActivity?.Area ?? 0);
+                        else
+                            valuesForCompanionModels[valueToSupply.Key] = 0;
+                        break;
+                    case "per hectare harvested":
+                        if (parentManageProductActivity.AmountHarvested > 0)
+                            valuesForCompanionModels[valueToSupply.Key] = (parentManagementActivity?.Area ?? 0) * parentManageProductActivity.UnitsToHaConverter;
+                        else
+                            valuesForCompanionModels[valueToSupply.Key] = 0;
+                        break;
+                    default:
+                        throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
+                }
             }
-
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, this.Category, RelatesToResourceName);
-        }
-
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
-        {
-            return;
-        }
-
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
             return null;
         }
 
-        /// <summary>
-        /// Resource shortfall event handler
-        /// </summary>
-        public override event EventHandler ResourceShortfallOccurred;
 
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnShortfallOccurred(EventArgs e)
+        /// <inheritdoc/>
+        protected override void AdjustResourcesForTimestep()
         {
-            ResourceShortfallOccurred?.Invoke(this, e);
+            IEnumerable<ResourceRequest> shortfalls = MinimumShortfallProportion();
+            if (shortfalls.Any())
+            {
+                // find shortfall by identifiers as these may have different influence on outcome
+                var tagsShort = shortfalls.Where(a => a.CompanionModelDetails.identifier == "").FirstOrDefault();
+                //if (tagsShort != null)
+                amountToSkip = (1 - tagsShort.Available / tagsShort.Required);
+            }
         }
 
-        /// <summary>
-        /// Resource shortfall occured event handler
-        /// </summary>
-        public override event EventHandler ActivityPerformed;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnActivityPerformed(EventArgs e)
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
-            ActivityPerformed?.Invoke(this, e);
-        }
-
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            return;
+            if(ResourceRequestList.Any())
+            {
+                SetStatusSuccessOrPartial(amountToSkip > 0);
+            }
         }
 
         #region validation
@@ -230,9 +166,8 @@ namespace Models.CLEM.Activities
             while(!(follow is ActivitiesHolder))
             {
                 if(follow is CropActivityManageProduct)
-                {
                     return results;
-                }
+
                 if(!(follow is ActivityFolder))
                 {
                     string[] memberNames = new string[] { "Parent model" };
@@ -247,32 +182,13 @@ namespace Models.CLEM.Activities
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
-                if (this.FindAllChildren<CropActivityFee>().Count() + this.FindAllChildren<LabourRequirement>().Count() == 0)
-                {
+                if (this.FindAllChildren<ActivityFee>().Count() + this.FindAllChildren<LabourRequirement>().Count() == 0)
                     htmlWriter.Write("<div class=\"errorlink\">This task is not needed as it has no fee or labour requirement</div>");
-                }
-                else
-                {
-                    htmlWriter.Write("\r\n<div class=\"activityentry\">This activity uses a category label ");
-                    if (Category != null && Category != "")
-                    {
-                        htmlWriter.Write("<span class=\"setvalue\">" + Category + "</span> ");
-                    }
-                    else
-                    {
-                        htmlWriter.Write("<span class=\"errorlink\">[NOT SET]</span> ");
-                    }
-                    htmlWriter.Write(" for all transactions</div>");
-                }
                 return htmlWriter.ToString(); 
             }
         } 

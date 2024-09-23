@@ -1,6 +1,6 @@
-﻿using Models.Core;
+﻿using System;
+using Models.Core;
 using Models.PMF.Phen;
-using System;
 
 namespace Models.Functions
 {
@@ -8,7 +8,7 @@ namespace Models.Functions
     /// Starts with an initial value and subtracts the value of a child
     /// function each day.
     /// </summary>
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [Serializable]
     public class DecumulateFunction : Model, IFunction
@@ -90,8 +90,8 @@ namespace Models.Functions
             // Only decumulate if:
             //     1. Start stage is not provided or it is provided and we're past it
             // AND 2. Stop stage is not provided or it is provided and we're not past it.
-            if (( string.IsNullOrWhiteSpace(StartStageName) || phenology.Stage >= phenology.StartStagePhaseIndex(StartStageName) + 1 ) &&
-                ( string.IsNullOrWhiteSpace(StopStageName)  || phenology.Stage <= phenology.StartStagePhaseIndex(StopStageName) + 1 ))
+            if ((string.IsNullOrWhiteSpace(StartStageName) || phenology.Stage >= phenology.StartStagePhaseIndex(StartStageName) + 1) &&
+                (string.IsNullOrWhiteSpace(StopStageName) || phenology.Stage <= phenology.StartStagePhaseIndex(StopStageName) + 1))
             {
                 accumulator -= child.Value();
                 accumulator = Math.Max(accumulator, MinValue);

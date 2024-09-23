@@ -1,9 +1,9 @@
-﻿namespace UnitTests.APSIMShared
-{
-    using APSIM.Shared.JobRunning;
-    using System;
-    using System.Threading;
+﻿using APSIM.Shared.JobRunning;
+using System;
+using System.Threading;
 
+namespace UnitTests.APSIMShared
+{
     public class MockJob : IRunnable
     {
         private bool doThrow;
@@ -15,12 +15,24 @@
         {
             doThrow = throws;
         }
+        /// <summary>
+        /// Prepare the job for running.
+        /// </summary>
+        public void Prepare()
+        {
+            // Do nothing.
+        }
+
         public void Run(CancellationTokenSource cancelToken)
         {
             Thread.Sleep(50);
             if (doThrow)
                 throw new Exception("Intentional exception");
             HasRun = true;
+        }
+
+        public void Cleanup(System.Threading.CancellationTokenSource cancelToken)
+        {
         }
     }
 }

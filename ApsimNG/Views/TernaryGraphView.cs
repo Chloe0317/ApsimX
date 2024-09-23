@@ -6,11 +6,7 @@ using OxyPlot.GtkSharp;
 using System;
 using System.Collections.Generic;
 using UserInterface.Extensions;
-
-#if NETCOREAPP
-using ExposeEventArgs = Gtk.DrawnArgs;
-using StateType = Gtk.StateFlags;
-#endif
+using Utility;
 
 namespace UserInterface.Views
 {
@@ -41,18 +37,16 @@ namespace UserInterface.Views
 
         public TernaryGraphView(ViewBase owner) : base(owner)
         {
-            HBox container = new HBox();
+            Box container = new Box(Orientation.Horizontal, 0);
             chart = new DrawingArea();
             chart.AddEvents((int)Gdk.EventMask.ExposureMask
             | (int)Gdk.EventMask.PointerMotionMask
             | (int)Gdk.EventMask.ButtonPressMask
             | (int)Gdk.EventMask.ButtonReleaseMask);
 
-#if NETFRAMEWORK
-            chart.ExposeEvent += OnDrawChart;
-#else
+
             chart.Drawn += OnDrawChart;
-#endif
+
             chart.ButtonPressEvent += OnMouseButtonPress;
             chart.ButtonReleaseEvent += OnMouseButtonRelease;
             chart.MotionNotifyEvent += OnMouseMove;
@@ -63,7 +57,7 @@ namespace UserInterface.Views
             ylabel = new Label();
             zlabel = new Label();
 
-            VBox labels = new VBox();
+            Box labels = new Box(Orientation.Vertical, 0);
             labels.PackStart(xlabel, false, false, 0);
             labels.PackStart(ylabel, false, false, 0);
             labels.PackStart(zlabel, false, false, 0);
@@ -78,11 +72,9 @@ namespace UserInterface.Views
         {
             try
             {
-#if NETFRAMEWORK
-                chart.ExposeEvent -= OnDrawChart;
-#else
+
                 chart.Drawn -= OnDrawChart;
-#endif
+
                 chart.ButtonPressEvent -= OnMouseButtonPress;
                 chart.ButtonReleaseEvent -= OnMouseButtonRelease;
                 chart.MotionNotifyEvent -= OnMouseMove;
@@ -171,7 +163,7 @@ namespace UserInterface.Views
             double y3 = height + offsetY;
 
             context.NewPath();
-            context.SetSourceColor(Utility.Colour.ToOxy(owner.MainWidget.GetForegroundColour(StateType.Normal)));
+            context.SetSourceColor(Utility.Colour.ToOxy(owner.MainWidget.StyleContext.GetColor(StateFlags.Normal).ToColour().ToGdk()));
 
             context.MoveTo(x1, y1);
 
@@ -222,25 +214,21 @@ namespace UserInterface.Views
             context.NewPath();
             context.Arc(p.X, p.Y, markerRadius, 0, 2 * Math.PI);
             context.StrokePreserve();
-            context.SetSourceColor(Utility.Colour.ToOxy(owner.MainWidget.GetForegroundColour(StateType.Normal)));
+            context.SetSourceColor(owner.MainWidget.StyleContext.GetColor(StateFlags.Normal).ToColour().ToOxy());
             context.Fill();
         }
 
         private void Refresh(bool drawTriangle)
         {
-#if NETFRAMEWORK
-            bool isPaintable = chart.IsAppPaintable;
-#else
+
             bool isPaintable = chart.AppPaintable;
-#endif
+
             if (isPaintable && chart.Visible)
             {
-#if NETFRAMEWORK
-                Context context = Gdk.CairoHelper.Create(chart.GdkWindow);
-#else
-                Gdk.DrawingContext drawingContext = chart.GetGdkWindow().BeginDrawFrame(chart.GetGdkWindow().VisibleRegion);
+
+                Gdk.DrawingContext drawingContext = chart.Window.BeginDrawFrame(chart.Window.VisibleRegion);
                 Context context = drawingContext.CairoContext;
-#endif
+
 
                 if (drawTriangle)
                     DrawTriangle(context);
@@ -276,7 +264,7 @@ namespace UserInterface.Views
         /// </summary>
         /// <param name="o">Sender object.</param>
         /// <param name="args">Event arguments.</param>
-        private void OnDrawChart(object o, ExposeEventArgs args)
+        private void OnDrawChart(object o, DrawnArgs args)
         {
             try
             {

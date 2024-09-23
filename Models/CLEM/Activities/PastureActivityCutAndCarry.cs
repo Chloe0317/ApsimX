@@ -1,4 +1,5 @@
-﻿using Models.CLEM.Groupings;
+﻿using Models.CLEM.Interfaces;
+using Models.CLEM.Limiters;
 using Models.CLEM.Resources;
 using Models.Core;
 using Models.Core.Attributes;
@@ -6,8 +7,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.IO;
 
@@ -15,26 +14,31 @@ namespace Models.CLEM.Activities
 {
     /// <summary>Activity to perform manual cut and carry from a pasture</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CLEMActivityBase))]
     [ValidParent(ParentType = typeof(ActivitiesHolder))]
     [ValidParent(ParentType = typeof(ActivityFolder))]
-    [Description("Activity to perform cut and carry from a specified graze food store (i.e. native pasture paddock).")]
+    [Description("Perform cut and carry from a specified graze food store (i.e. native pasture paddock)")]
     [Version(1, 0, 1, "Included new ProportionOfAvailable option for moving pasture")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Pasture/CutAndCarry.htm")]
-    public class PastureActivityCutAndCarry : CLEMRuminantActivityBase
+    public class PastureActivityCutAndCarry : CLEMRuminantActivityBase, IHandlesActivityCompanionModels
     {
         [Link]
-        Clock Clock = null;
+        private IClock clock = null;
+        private GrazeFoodStoreType pasture;
+        private AnimalFoodStoreType foodstore;
+        private ActivityCarryLimiter limiter;
+        private double amountToDo;
+        private double amountToSkip;
 
         /// <summary>
         /// Name of graze food store/paddock to cut and carry from
         /// </summary>
         [Description("Graze food store/paddock")]
         [Required(AllowEmptyStrings = false, ErrorMessage = "Graze food store where pasture is located required")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMResourceGroups = new Type[] { typeof(GrazeFoodStore) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { typeof(GrazeFoodStore) } })]
         public string PaddockName { get; set; }
 
         /// <summary>
@@ -42,7 +46,7 @@ namespace Models.CLEM.Activities
         /// </summary>
         [Description("Animal food store to receive pasture")]
         [Required(AllowEmptyStrings = false, ErrorMessage = "Animal food store to receive pasture is required")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMResourceGroups = new Type[] { typeof(AnimalFoodStore) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { typeof(AnimalFoodStore) } })]
         public string AnimalFoodStoreName { get; set; }
 
         /// <summary>
@@ -72,9 +76,13 @@ namespace Models.CLEM.Activities
         [JsonIgnore]
         public double AmountAvailableForHarvest { get; set; }
 
-        private GrazeFoodStoreType pasture { get; set; }
-        private AnimalFoodStoreType foodstore { get; set; }
-        private ActivityCutAndCarryLimiter limiter;
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        public PastureActivityCutAndCarry()
+        {
+            AllocationStyle = ResourceAllocationStyle.Manual;
+        }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
         /// <param name="sender">The sender.</param>
@@ -84,15 +92,15 @@ namespace Models.CLEM.Activities
         {
             // activity is performed in CLEMDoCutAndCarry not CLEMGetResources
             this.AllocationStyle = ResourceAllocationStyle.Manual;
-            
+
             // get pasture
-            pasture = Resources.GetResourceItem(this, PaddockName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as GrazeFoodStoreType;
+            pasture = Resources.FindResourceType<GrazeFoodStore, GrazeFoodStoreType>(this, PaddockName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
 
             // get food store
-            foodstore = Resources.GetResourceItem(this, AnimalFoodStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as AnimalFoodStoreType;
+            foodstore = Resources.FindResourceType<AnimalFoodStore, AnimalFoodStoreType>(this, AnimalFoodStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
 
             // locate a cut and carry limiter associarted with this event.
-            limiter = LocateCutAndCarryLimiter(this);
+            limiter = ActivityCarryLimiter.Locate(this);
 
             switch (CutStyle)
             {
@@ -107,363 +115,175 @@ namespace Models.CLEM.Activities
             }
         }
 
-        /// <summary>An event handler for a Cut and Carry</summary>
-        /// <param name="sender">The sender.</param>
-        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
+        {
+            switch (type)
+            {
+                case "ActivityFee":
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>(),
+                        measures: new List<string>() {
+                            "fixed",
+                            "per kg collected",
+                        }
+                        );
+                default:
+                    return new LabelsForCompanionModels();
+            }
+        }
+
+        /// <inheritdoc/>
         [EventSubscribe("CLEMDoCutAndCarry")]
-        private void OnCLEMDoCutAndCarry(object sender, EventArgs e)
+        protected override void OnGetResourcesPerformActivity(object sender, EventArgs e)
         {
-            AmountHarvested = 0;
-            AmountAvailableForHarvest = 0;
-
-            if (this.TimingOK)
-            {
-                switch (CutStyle)
-                {
-                    case RuminantFeedActivityTypes.ProportionOfFeedAvailable:
-                        AmountHarvested += pasture.Amount * Supply;
-                        break;
-                    case RuminantFeedActivityTypes.SpecifiedDailyAmount:
-                        AmountHarvested += Supply * 30.4;
-                        break;
-                    case RuminantFeedActivityTypes.ProportionOfWeight:
-                        foreach (Ruminant ind in CurrentHerd(false))
-                        {
-                            AmountHarvested += Supply * ind.Weight * 30.4;
-                        }
-                        break;
-                    case RuminantFeedActivityTypes.ProportionOfPotentialIntake:
-                        foreach (Ruminant ind in CurrentHerd(false))
-                        {
-                            AmountHarvested += Supply * ind.PotentialIntake;
-                        }
-                        break;
-                    case RuminantFeedActivityTypes.ProportionOfRemainingIntakeRequired:
-                        foreach (Ruminant ind in CurrentHerd(false))
-                        {
-                            AmountHarvested += Supply * (ind.PotentialIntake - ind.Intake);
-                        }
-                        break;
-                    default:
-                        throw new Exception(String.Format("FeedActivityType {0} is not supported in {1}", CutStyle, this.Name));
-                }
-
-                AmountAvailableForHarvest = AmountHarvested;
-                // reduce amount by limiter if present.
-                if (limiter != null)
-                {
-                    double canBeCarried = limiter.GetAmountAvailable(Clock.Today.Month);
-                    AmountHarvested = Math.Max(AmountHarvested, canBeCarried);
-                    limiter.AddWeightCarried(AmountHarvested);
-                }
-            }
-
-            // get resources
-            GetResourcesRequiredForActivity();
+            ManageActivityResourcesAndTasks();
         }
 
-        /// <summary>
-        /// Method to determine resources required for this activity in the current month
-        /// </summary>
-        /// <returns>A list of resource requests</returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
-            List<ResourceRequest> requestList = null;
-            if (AmountHarvested > 0)
+            amountToSkip = 0;
+
+            switch (CutStyle)
             {
-                FoodResourcePacket packet = new FoodResourcePacket()
-                {
-                    Amount = AmountHarvested,
-                    PercentN = pasture.Nitrogen,
-                    DMD = pasture.EstimateDMD(pasture.Nitrogen)
-                };
-                requestList = new List<ResourceRequest>()
-                {
-                    new ResourceRequest()
-                    {
-                        ActivityModel = this,
-                        AdditionalDetails = this,
-                        Category = "Cut and carry",
-                        Required = AmountHarvested,
-                        Resource = pasture,
-                    }
-                };
-            }
-            return requestList;
-        }
-
-        /// <summary>
-        /// Determine the labour required for this activity based on LabourRequired items in tree
-        /// </summary>
-        /// <param name="requirement">Labour requirement model</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
-        {
-            double daysNeeded;
-            // TODO add labour multiplier if pasture below given amount and difficult to cut
-            // as per IAT rules below 500kg/ha
-
-            switch (requirement.UnitType)
-            {
-                case LabourUnitType.perKg:
-                    daysNeeded = requirement.LabourPerUnit * AmountHarvested;
+                case RuminantFeedActivityTypes.ProportionOfFeedAvailable:
+                    amountToDo += pasture.Amount * Supply;
                     break;
-                case LabourUnitType.perUnit:
-                    double numberUnits = AmountHarvested / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = requirement.LabourPerUnit * numberUnits;
+                case RuminantFeedActivityTypes.SpecifiedDailyAmount:
+                    amountToDo += Supply * 30.4;
                     break;
-                case LabourUnitType.Fixed:
-                    daysNeeded = requirement.LabourPerUnit;
+                case RuminantFeedActivityTypes.ProportionOfWeight:
+                    foreach (Ruminant ind in CurrentHerd(false))
+                    {
+                        amountToDo += Supply * ind.Weight * 30.4;
+                    }
+                    break;
+                case RuminantFeedActivityTypes.ProportionOfPotentialIntake:
+                    foreach (Ruminant ind in CurrentHerd(false))
+                    {
+                        amountToDo += Supply * ind.PotentialIntake;
+                    }
+                    break;
+                case RuminantFeedActivityTypes.ProportionOfRemainingIntakeRequired:
+                    foreach (Ruminant ind in CurrentHerd(false))
+                    {
+                        amountToDo += Supply * (ind.PotentialIntake - ind.Intake);
+                    }
                     break;
                 default:
-                    throw new Exception(String.Format("LabourUnitType {0} is not supported for {1} in {2}", requirement.UnitType, requirement.Name, this.Name));
+                    throw new Exception(String.Format("FeedActivityType {0} is not supported in {1}", CutStyle, this.Name));
             }
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, "Cut and carry", pasture.NameWithParent);
-        }
 
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            // labour limiter
-            var labourRequests = ResourceRequestList.Where(a => a.ResourceType == typeof(Labour)).ToList();
-            if(labourRequests.Count>0)
+            // reduce amount by limiter if present.
+            if (limiter != null)
             {
-                double required = labourRequests.Sum(a => a.Required);
-                double provided = labourRequests.Sum(a => a.Provided);
-                double limiter = Math.Min(1.0, provided / required);
-
-                // TODO add ability to turn off labour influence
-                if(limiter<1)
-                {
-                    // find pasture and reduce required based on labour limit.
-                    ResourceRequest pastureRequest = ResourceRequestList.Where(a => a.ResourceType == typeof(GrazeFoodStoreType)).FirstOrDefault();
-                    if (pastureRequest != null)
-                    {
-                        AmountHarvested *= limiter;
-                        pastureRequest.Required = AmountHarvested;
-                    }
-                }
+                double canBeCarried = limiter.GetAmountAvailable(clock.Today.Month);
+                Status = ActivityStatus.Warning;
+                AddStatusMessage("CutCarry limit enforced");
+                amountToDo = Math.Max(amountToDo, canBeCarried);
             }
-        }
 
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
-        {
-            FoodResourcePacket packet = new FoodResourcePacket()
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
             {
-                Amount = AmountHarvested,
-                PercentN = pasture.Nitrogen,
-                DMD = pasture.EstimateDMD(pasture.Nitrogen)
-            };
-
-            foodstore.Add(packet, this,"", "Cut and carry");
-        }
-
-        private void PutPastureInStore()
-        {
-            AmountHarvested = 0;
-            AmountAvailableForHarvest = 0;
-            List<Ruminant> herd = new List<Ruminant>();
-
-            if (this.TimingOK)
-            {
-                // determine amount to be cut and carried
-                if (CutStyle != RuminantFeedActivityTypes.SpecifiedDailyAmount)
+                switch (valueToSupply.Key.unit)
                 {
-                    herd = CurrentHerd(false);
-                }
-                switch (CutStyle)
-                {
-                    case RuminantFeedActivityTypes.SpecifiedDailyAmount:
-                        AmountHarvested += Supply * 30.4;
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
                         break;
-                    case RuminantFeedActivityTypes.ProportionOfWeight:
-                        foreach (Ruminant ind in herd)
-                        {
-                            AmountHarvested += Supply * ind.Weight * 30.4;
-                        }
-                        break;
-                    case RuminantFeedActivityTypes.ProportionOfPotentialIntake:
-                        foreach (Ruminant ind in herd)
-                        {
-                            AmountHarvested += Supply * ind.PotentialIntake;
-                        }
-                        break;
-                    case RuminantFeedActivityTypes.ProportionOfRemainingIntakeRequired:
-                        foreach (Ruminant ind in herd)
-                        {
-                            AmountHarvested += Supply * (ind.PotentialIntake - ind.Intake);
-                        }
+                    case "per kg collected":
+                        valuesForCompanionModels[valueToSupply.Key] = amountToDo;
                         break;
                     default:
-                        throw new Exception(String.Format("FeedActivityType {0} is not supported in {1}", CutStyle, this.Name));
-                }
-
-                AmountAvailableForHarvest = AmountHarvested;
-                // reduce amount by limiter if present.
-                if (limiter != null)
-                {
-                    double canBeCarried = limiter.GetAmountAvailable(Clock.Today.Month);
-                    AmountHarvested = Math.Max(AmountHarvested, canBeCarried);
-                    limiter.AddWeightCarried(AmountHarvested);
-                }
-
-                double labourlimiter = 1.0;
-
-
-                AmountHarvested *= labourlimiter;
-
-                if (AmountHarvested > 0)
-                {
-                    FoodResourcePacket packet = new FoodResourcePacket()
-                    {
-                        Amount = AmountHarvested,
-                        PercentN = pasture.Nitrogen,
-                        DMD = pasture.EstimateDMD(pasture.Nitrogen)
-                    };
-
-                    // take resource
-                    ResourceRequest request = new ResourceRequest()
-                    {
-                        ActivityModel = this,
-                        AdditionalDetails = this,
-                        Category = "Cut and carry",
-                        Required = AmountHarvested,
-                        Resource = pasture
-                    };
-                    pasture.Remove(request);
-
-                    foodstore.Add(packet, this, "", "Cut and carry");
-                }
-                SetStatusSuccess();
-            }
-            // report activity performed.
-            ActivityPerformedEventArgs activitye = new ActivityPerformedEventArgs
-            {
-                Activity = this
-            };
-            this.OnActivityPerformed(activitye);
-        }
-
-        /// <summary>
-        /// Method to locate a ActivityCutAndCarryLimiter
-        /// </summary>
-        /// <param name="model"></param>
-        /// <returns></returns>
-        private ActivityCutAndCarryLimiter LocateCutAndCarryLimiter(IModel model)
-        {
-            // search children
-            ActivityCutAndCarryLimiter limiterFound = model.FindAllChildren<ActivityCutAndCarryLimiter>().Cast<ActivityCutAndCarryLimiter>().FirstOrDefault();
-            if (limiterFound == null)
-            {
-                if (model.Parent.GetType().IsSubclassOf(typeof(CLEMActivityBase)) || model.Parent.GetType() == typeof(ActivitiesHolder))
-                {
-                    limiterFound = LocateCutAndCarryLimiter(model.Parent);
+                        throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
                 }
             }
-            return limiterFound;
-        }
-
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
             return null;
         }
 
-        /// <summary>
-        /// Resource shortfall event handler
-        /// </summary>
-        public override event EventHandler ResourceShortfallOccurred;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnShortfallOccurred(EventArgs e)
+        /// <inheritdoc/>
+        protected override void AdjustResourcesForTimestep()
         {
-            ResourceShortfallOccurred?.Invoke(this, e);
+            IEnumerable<ResourceRequest> shortfalls = MinimumShortfallProportion();
+            if (shortfalls.Any())
+            {
+                // find shortfall by identifiers as these may have different influence on outcome
+                var tagsShort = shortfalls.FirstOrDefault();
+                amountToSkip = Convert.ToInt32(amountToDo * (1 - tagsShort.Available / tagsShort.Required));
+                if (amountToSkip < 0)
+                {
+                    Status = ActivityStatus.Warning;
+                    AddStatusMessage("Resource shortfall prevented any action");
+                }
+            }
         }
 
-        /// <summary>
-        /// Resource shortfall occured event handler
-        /// </summary>
-        public override event EventHandler ActivityPerformed;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnActivityPerformed(EventArgs e)
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
-            ActivityPerformed?.Invoke(this, e);
+            if (amountToDo > 0)
+            {
+                pasture.Remove(new ResourceRequest()
+                {
+                    ActivityModel = this,
+                    AdditionalDetails = this,
+                    Category = TransactionCategory,
+                    Required = amountToDo - amountToSkip,
+                    Resource = pasture
+                });
+                AmountAvailableForHarvest = amountToDo;
+                AmountHarvested = amountToDo - amountToSkip;
+
+                FoodResourcePacket packet = new FoodResourcePacket()
+                {
+                    Amount = amountToDo - amountToSkip,
+                    PercentN = pasture.Nitrogen,
+                    DMD = pasture.EstimateDMD(pasture.Nitrogen)
+                };
+
+                foodstore.Add(packet, this, null, TransactionCategory);
+                limiter.AddWeightCarried(amountToDo - amountToSkip);
+                SetStatusSuccessOrPartial(amountToSkip > 0);
+            }
         }
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
                 htmlWriter.Write("\r\n<div class=\"activityentry\">");
-                htmlWriter.Write("Cut ");
+                htmlWriter.Write($"Cut {CLEMModel.DisplaySummaryValueSnippet(Supply, warnZero:true)}");
                 switch (CutStyle)
                 {
                     case RuminantFeedActivityTypes.SpecifiedDailyAmount:
-                        htmlWriter.Write("<span class=\"setvalue\">" + Supply.ToString("#,##0.##") + "</span> kg ");
+                        htmlWriter.Write(" kg ");
                         break;
                     case RuminantFeedActivityTypes.ProportionOfWeight:
-                        htmlWriter.Write("<span class=\"setvalue\">" + Supply.ToString("#0.##%") + "</span> of herd <span class=\"setvalue\">live weight</span> ");
+                        htmlWriter.Write(" of herd <span class=\"setvalue\">live weight</span> ");
                         break;
                     case RuminantFeedActivityTypes.ProportionOfPotentialIntake:
-                        htmlWriter.Write("<span class=\"setvalue\">" + Supply.ToString("#0.##%") + "</span> of herd <span class=\"setvalue\">potential intake</span> ");
+                        htmlWriter.Write(" of herd <span class=\"setvalue\">potential intake</span> ");
                         break;
                     case RuminantFeedActivityTypes.ProportionOfRemainingIntakeRequired:
-                        htmlWriter.Write("<span class=\"setvalue\">" + Supply.ToString("#0.##%") + "</span> of herd <span class=\"setvalue\">remaining intake required</span> ");
+                        htmlWriter.Write(" of herd <span class=\"setvalue\">remaining intake required</span> ");
                         break;
                     default:
                         break;
                 }
 
                 htmlWriter.Write("from ");
-                if (PaddockName == null || PaddockName == "")
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[PASTURE NOT SET]</span>");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"resourcelink\">" + PaddockName + "</span>");
-                }
+                htmlWriter.Write(CLEMModel.DisplaySummaryValueSnippet(PaddockName, "Pasture not set", HTMLSummaryStyle.Resource));
                 htmlWriter.Write(" and carry to ");
-                if (AnimalFoodStoreName == null || AnimalFoodStoreName == "")
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[ANIMAL FOOD STORE NOT SET]</span>");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"resourcelink\">" + AnimalFoodStoreName + "</span>");
-                }
+                htmlWriter.Write(CLEMModel.DisplaySummaryValueSnippet(AnimalFoodStoreName, "Store not set", HTMLSummaryStyle.Resource));
                 htmlWriter.Write("</div>");
-
-                return htmlWriter.ToString(); 
+                return htmlWriter.ToString();
             }
-        } 
+        }
         #endregion
 
     }

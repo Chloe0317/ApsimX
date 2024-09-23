@@ -1,15 +1,18 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Globalization;
+using System.Text;
+
 namespace APSIM.Shared.Utilities
 {
-    using System;
-    using System.Collections;
-    using System.Collections.Generic;
-    using System.Collections.Specialized;
-    using System.Globalization;
+
 
     /// <summary>
     /// Static functions for string manipulation
     /// </summary>
-    public class StringUtilities
+    public static class StringUtilities
     {
         /// <summary>
         /// This function converts a C string to a vb string by returning everything 
@@ -87,7 +90,7 @@ namespace APSIM.Shared.Utilities
         {
             foreach (string Value in values)
                 if (Value.Equals(st, StringComparison.CurrentCultureIgnoreCase))
-                    return true; 
+                    return true;
             return false;
         }
         /// <summary>
@@ -115,7 +118,7 @@ namespace APSIM.Shared.Utilities
             }
             return -1;
         }
- 
+
         /// <summary>
         /// This method splits values on a comma but also honours double quotes
         /// ensuring something in double quotes is never split.
@@ -145,7 +148,7 @@ namespace APSIM.Shared.Utilities
                         // Found a word - store it.
                         if (Start != i)
                             ReturnStrings.Add(text.Substring(Start, i - Start).Trim(" ".ToCharArray()));
-                        Start = i+1;
+                        Start = i + 1;
 
                     }
                 }
@@ -257,11 +260,11 @@ namespace APSIM.Shared.Utilities
             int PosOpenBracket = st.LastIndexOf(openBracket);
             if (PosOpenBracket != -1)
             {
-            int PosCloseBracket = st.LastIndexOf(closeBracket);
+                int PosCloseBracket = st.LastIndexOf(closeBracket);
                 if (PosCloseBracket != -1 && PosOpenBracket < PosCloseBracket)
-            {
-                ReturnString = st.Substring(PosOpenBracket + 1, PosCloseBracket - PosOpenBracket - 1).Trim();
-                st = st.Remove(PosOpenBracket, PosCloseBracket - PosOpenBracket + 1).Trim();
+                {
+                    ReturnString = st.Substring(PosOpenBracket + 1, PosCloseBracket - PosOpenBracket - 1).Trim();
+                    st = st.Remove(PosOpenBracket, PosCloseBracket - PosOpenBracket + 1).Trim();
                 }
             }
             return ReturnString;
@@ -272,7 +275,7 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static string RemoveAfter(string st, char openBracket)
         {
-            int Pos = st.IndexOf(openBracket);
+            int Pos = st.LastIndexOf(openBracket);
             if (Pos != -1)
                 return st.Substring(0, Pos);
             else
@@ -284,7 +287,7 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static string GetAfter(string st, string delimiter)
         {
-            int Pos = st.IndexOf(delimiter);
+            int Pos = st.LastIndexOf(delimiter);
             if (Pos != -1)
                 return st.Substring(Pos + delimiter.Length);
             else
@@ -334,17 +337,34 @@ namespace APSIM.Shared.Utilities
         }
 
         /// <summary>
+        /// Convert the specified string to a double. Will throw a user-readable
+        /// message if conversion fails.
+        /// </summary>
+        /// <param name="str">The string to be converted to a number.</param>
+        public static double ParseDouble(string str)
+        {
+            try
+            {
+                return Convert.ToDouble(str, CultureInfo.InvariantCulture);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException($"Cannot convert '{str}' to a number", error);
+            }
+        }
+
+        /// <summary>
         /// Return a string with double quotes around St
         /// </summary>
         /// <param name="st"></param>
         /// <returns></returns>
         public static string DQuote(string st)
         {
-            if (st.IndexOfAny(new char[] { ' ', '&', '<', '>', '(', ')', 
-                                           '[', ']', '{', '}', '=', ';', 
-                                           '!', '\'', '+', ',', '^', 
+            if (st.IndexOfAny(new char[] { ' ', '&', '<', '>', '(', ')',
+                                           '[', ']', '{', '}', '=', ';',
+                                           '!', '\'', '+', ',', '^',
                                            '`', '~', '|','@' }) >= 0)
-              return "\"" + st + "\"";
+                return "\"" + st + "\"";
             return st;
         }
 
@@ -472,7 +492,7 @@ namespace APSIM.Shared.Utilities
             {
                 int PosLastPeriod = name.LastIndexOf(delimiter);
                 if (PosLastPeriod >= 0)
-                    ReturnName = name.Substring(PosLastPeriod+1);
+                    ReturnName = name.Substring(PosLastPeriod + 1);
             }
             return ReturnName;
         }
@@ -518,39 +538,32 @@ namespace APSIM.Shared.Utilities
         /// <returns>The return string</returns>
         public static string Build(IEnumerable values, string delimiter, string prefix = null, string suffix = null, string format = null)
         {
-            string returnString = string.Empty;
+            StringBuilder result = new StringBuilder();
+            bool first = true;
             foreach (object value in values)
             {
                 // Add in delimiter
-                if (returnString != string.Empty)
-                {
-                    returnString += delimiter;
-                }
+                if (!first)
+                    result.Append(delimiter);
+                else
+                    first = false;
 
                 // Add prefix
                 if (prefix != null)
-                {
-                    returnString += prefix;
-                }
+                    result.Append(prefix);
 
                 // Add value
                 if (format == null)
-                {
-                    returnString += value.ToString();
-                }
+                    result.Append(value.ToString());
                 else
-                {
-                    returnString += string.Format("{0:" + format + "}", value);
-                }
+                    result.Append(string.Format($"{{0:{format}}}", value));
 
                 // Add suffix
                 if (prefix != null)
-                {
-                    returnString += suffix;
-                }                
+                    result.Append(suffix);
             }
 
-            return returnString;
+            return result.ToString();
         }
 
         /// <summary>
@@ -811,7 +824,7 @@ namespace APSIM.Shared.Utilities
 
             if (token.Length > 0 && token.IndexOf('E') == token.Length - 1)  // Number is in exponential format
             {
-                MatchToken(ref parseSt, "+");       
+                MatchToken(ref parseSt, "+");
                 int exponent = 0;
                 if (TokenInt(ref parseSt, ref exponent))
                     token = token + exponent.ToString();  // Add the exponent to token
@@ -932,6 +945,42 @@ namespace APSIM.Shared.Utilities
             }
             else
                 return null;
+        }
+
+        /// <summary>Removes all symbols from a string</summary>
+        /// <param name="input">The string.</param>
+        /// <returns>The string without symbols</returns>
+        public static string CleanStringOfSymbols(string input)
+        {
+            string symbols = "`~!@#$%^&*()_+-={}|[]\\:\";'<>?,./' \t\n";
+            string output = input;
+            for (int i = 0; i < symbols.Length; i++)
+                output = output.Replace(symbols[i].ToString(), "");
+            return output;
+        }
+        
+        /// <summary>
+        /// Gets a specific line of text from a multiline string, preserving empty lines.
+        /// </summary>
+        /// <param name="text">Text.</param>
+        /// <param name="lineNo">0-indexed line number.</param>
+        /// <returns>String containing a specific line of text.</returns>
+        public static string GetLine(string text, int lineNo)
+        {
+            // string.Split(Environment.NewLine.ToCharArray()) doesn't work well for us on Windows - Mono.TextEditor seems 
+            // to use unix-style line endings, so every second element from the returned array is an empty string.
+            // If we remove all empty strings from the result then we also remove any lines which were deliberately empty.
+
+            string currentLine;
+            using (System.IO.StringReader reader = new System.IO.StringReader(text))
+            {
+                int i = 0;
+                while ((currentLine = reader.ReadLine()) != null && i < lineNo)
+                {
+                    i++;
+                }
+            }
+            return currentLine;
         }
     }
 }

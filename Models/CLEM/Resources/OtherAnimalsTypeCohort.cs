@@ -1,11 +1,8 @@
-﻿using Models.Core;
+﻿using Models.CLEM.Interfaces;
+using Models.Core;
 using Models.Core.Attributes;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Models.CLEM.Resources
 {
@@ -13,20 +10,20 @@ namespace Models.CLEM.Resources
     /// This stores the initialisation parameters for a Cohort of a specific Other Animal Type.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(OtherAnimalsType))]
-    [Description("This specifies an other animal cohort at the start of the simulation.")]
+    [Description("Specifies an other animal cohort at the start of the simulation")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Resources/Other animals/OtherAnimalsTypeCohort.htm")]
-    public class OtherAnimalsTypeCohort: CLEMModel
+    public class OtherAnimalsTypeCohort : CLEMModel, IFilterable
     {
         /// <summary>
-        /// Gender
+        /// Sex
         /// </summary>
-        [Description("Gender")]
+        [Description("Sex")]
         [Required]
-        public Sex Gender { get; set; }
+        public Sex Sex { get; set; }
 
         /// <summary>
         /// Age (Months)
@@ -62,15 +59,5 @@ namespace Models.CLEM.Resources
         /// Flag to identify individual ready for sale
         /// </summary>
         public HerdChangeReason SaleFlag { get; set; }
-
-        /// <summary>
-        /// Gender as string for reports
-        /// </summary>
-        public string GenderAsString { get { return Gender.ToString().Substring(0, 1); } }
-
-        /// <summary>
-        /// SaleFlag as string for reports
-        /// </summary>
-        public string SaleFlagAsString { get { return SaleFlag.ToString(); } }
     }
 }

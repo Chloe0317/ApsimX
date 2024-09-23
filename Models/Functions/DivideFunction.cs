@@ -1,15 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
-using Models.Core;
 using System.Linq;
+using APSIM.Shared.Documentation;
+using APSIM.Shared.Utilities;
+using Models.Core;
 
 namespace Models.Functions
 {
-    /// <summary>
-    /// [DocumentMathFunction d]
-    /// </summary>
+    /// <summary>A class that divides all child functions.</summary>
     [Serializable]
     [Description("Starting with the first child function, recursively divide by the values of the subsequent child functions")]
     public class DivideFunction : Model, IFunction
@@ -38,11 +36,18 @@ namespace Models.Functions
                         if (denominator == 0)
                             returnValue = 0;
                         else
-                            returnValue = returnValue / denominator;
+                            returnValue = MathUtilities.Divide(returnValue, denominator,0);
                     }
 
             }
             return returnValue;
+        }
+
+        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
+        public override IEnumerable<ITag> Document()
+        {
+            foreach (var tag in MultiplyFunction.DocumentMathFunction('/', Name, Children))
+                yield return tag;
         }
     }
 }

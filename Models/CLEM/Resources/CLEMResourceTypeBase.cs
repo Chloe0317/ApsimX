@@ -1,28 +1,25 @@
-﻿using Models.Core;
+using Models.CLEM.Interfaces;
+using Models.Core;
 using Models.Core.Attributes;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System;
+using System.Linq;
 
 namespace Models.CLEM.Resources
 {
     ///<summary>
     /// CLEM Resource Type base model
-    ///</summary> 
+    ///</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [Description("This is the CLEM Resource Type Base Class and should not be used directly.")]
     [Version(1, 0, 1, "")]
-    public class CLEMResourceTypeBase : CLEMModel
+    public class CLEMResourceTypeBase : CLEMModel, IResourceWithTransactionType
     {
         [Link]
-        [NonSerialized]
-        Clock Clock = null;
+        private readonly IClock clock = null;
+        private ResourceBaseWithTransactions parent;
 
         /// <summary>
         /// A link to the equivalent market store for trading.
@@ -34,15 +31,14 @@ namespace Models.CLEM.Resources
         /// Has a market store been found
         /// </summary>
         [JsonIgnore]
-        public bool MarketStoreExists 
-        { 
-            get 
-            { 
+        public bool MarketStoreExists
+        {
+            get
+            {
                 if(!EquivalentMarketStoreDetermined)
-                {
                     FindEquivalentMarketStore();
-                }
-                return !(EquivalentMarketStore is null); 
+
+                return EquivalentMarketStore is not null; 
             } 
         }
 
@@ -55,12 +51,30 @@ namespace Models.CLEM.Resources
         /// Determine whether transmutation has been defined for this foodtype
         /// </summary>
         [JsonIgnore]
-        public bool TransmutationDefined 
+        public bool TransmutationDefined
         {
             get
             {
-                return this.FindAllChildren<Transmutation>().Where(a => a.Enabled).Count() > 0;
+                return FindAllChildren<Transmutation>().Where(a => a.Enabled).Any();
             }
+        }
+
+        /// <summary>An event handler to allow us to initialise ourselves.</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("Commencing")]
+        protected void OnSetupTypeBase(object sender, EventArgs e)
+        {
+            parent = FindAncestor<ResourceBaseWithTransactions>();
+        }
+
+        /// <summary>
+        /// Set the resource base with transaction parent of the resource type
+        /// </summary>
+        /// <param name="resourceBaseParent"></param>
+        public void SetParentResourceBaseWithTransactions(ResourceBaseWithTransactions resourceBaseParent)
+        {
+            parent = resourceBaseParent;
         }
 
         /// <summary>
@@ -69,7 +83,7 @@ namespace Models.CLEM.Resources
         public bool PricingExists(PurchaseOrSalePricingStyleType priceType)
         {
             // find pricing that is ok;
-            return this.FindAllChildren<ResourcePricing>().Where(a => a.Enabled & ((a as ResourcePricing).PurchaseOrSale == PurchaseOrSalePricingStyleType.Both | (a as ResourcePricing).PurchaseOrSale == priceType) && (a as ResourcePricing).TimingOK).FirstOrDefault() != null;
+            return FindAllChildren<ResourcePricing>().Where(a => a.Enabled & ((a as ResourcePricing).PurchaseOrSale == PurchaseOrSalePricingStyleType.Both | (a as ResourcePricing).PurchaseOrSale == priceType) && (a as ResourcePricing).TimingOK).FirstOrDefault() != null;
         }
 
         /// <summary>
@@ -81,46 +95,33 @@ namespace Models.CLEM.Resources
             ResourcePricing price = null;
 
             // if market exists look for market pricing to override local pricing as all transactions will be through the market
-            if (!((this.Parent.Parent as ResourcesHolder).FoundMarket is null) && this.MarketStoreExists)
-            {
-                price = EquivalentMarketStore.FindAllChildren<ResourcePricing>().FirstOrDefault(a => a.Enabled && ((a as ResourcePricing).PurchaseOrSale == PurchaseOrSalePricingStyleType.Both || (a as ResourcePricing).PurchaseOrSale == priceType) && (a as ResourcePricing).TimingOK);
-            }
+            if ((Parent.Parent as ResourcesHolder).FoundMarket is not null && MarketStoreExists)
+                price = EquivalentMarketStore.FindAllChildren<ResourcePricing>().FirstOrDefault(a => a.Enabled && (a.PurchaseOrSale == PurchaseOrSalePricingStyleType.Both || a.PurchaseOrSale == priceType) && a.TimingOK);
             else
-            {
-                price = FindAllChildren<ResourcePricing>().FirstOrDefault(a => ((a as ResourcePricing).PurchaseOrSale == PurchaseOrSalePricingStyleType.Both | (a as ResourcePricing).PurchaseOrSale == priceType) && (a as ResourcePricing).TimingOK);
-            }
+                price = FindAllChildren<ResourcePricing>().FirstOrDefault(a => (a.PurchaseOrSale == PurchaseOrSalePricingStyleType.Both | a.PurchaseOrSale == priceType) && a.TimingOK);
 
             if (price == null)
             {
                 // does simulation have finance
-                if (FindAncestor<ResourcesHolder>().FinanceResource() != null)
+                if (FindAncestor<ResourcesHolder>().FindResourceGroup<Finance>() != null)
                 {
                     string market = "";
-                    if((this.Parent.Parent as ResourcesHolder).MarketPresent)
+                    if((Parent.Parent as ResourcesHolder).MarketPresent)
                     {
-                        if(!(this.EquivalentMarketStore is null))
-                        {
-                            market = this.EquivalentMarketStore.CLEMParentName + ".";
-                        }
+                        if(!(EquivalentMarketStore is null))
+                            market = EquivalentMarketStore.CLEMParentName + ".";
                         else
-                        {
-                            market = this.CLEMParentName + ".";
-                        }
+                            market = CLEMParentName + ".";
                     }
-                    string warn = $"No pricing is available for [r={market}{this.Parent.Name}.{this.Name}]";
-                    if (Clock != null && FindAllChildren<ResourcePricing>().Any())
-                    {
-                        warn += " in month [" + Clock.Today.ToString("MM yyyy") + "]";
-                    }
-                    warn += "\r\nAdd [r=ResourcePricing] component to [r=" + market + this.Parent.Name + "." + this.Name + "] to include financial transactions for purchases and sales.";
+                    string warn = $"No pricing is available for [r={market}{Parent.Name}.{Name}]";
+                    if (clock != null && FindAllChildren<ResourcePricing>().Any())
+                        warn += " in month [" + clock.Today.ToString("MM yyyy") + "]";
+                    warn += "\r\nAdd [r=ResourcePricing] component to [r=" + market + Parent.Name + "." + Name + "] to include financial transactions for purchases and sales.";
 
-                    if (!Warnings.Exists(warn) & Summary != null)
-                    {
-                        Summary.WriteWarning(this, warn);
-                        Warnings.Add(warn);
-                    }
+                    if (Summary != null)
+                        Warnings.CheckAndWrite(warn, Summary, this, MessageType.Warning);
                 }
-                return new ResourcePricing() { PricePerPacket=0, PacketSize=1, UseWholePackets=true };
+                return new ResourcePricing() { PricePerPacket = 0, PacketSize = 1, UseWholePackets = true };
             }
             return price;
         }
@@ -134,7 +135,7 @@ namespace Models.CLEM.Resources
         public object ConvertTo(string converterName, double amount)
         {
             // get converted value
-            if(converterName.StartsWith("$"))
+            if (converterName.StartsWith("$"))
             {
                 // calculate price as special case using pricing structure if present.
                 ResourcePricing price;
@@ -164,28 +165,22 @@ namespace Models.CLEM.Resources
                 }
                 else
                 {
-                    if(FindAncestor<ResourcesHolder>().FinanceResource() != null && amount != 0)
+                    if (FindAncestor<ResourcesHolder>().FindResourceGroup<Finance>() != null && amount != 0)
                     {
                         string market = "";
-                        if ((this.Parent.Parent as ResourcesHolder).MarketPresent)
+                        if ((Parent.Parent as ResourcesHolder).MarketPresent)
                         {
-                            if (!(this.EquivalentMarketStore is null))
-                            {
-                                market = this.EquivalentMarketStore.CLEMParentName + ".";
-                            }
+                            if (!(EquivalentMarketStore is null))
+                                market = EquivalentMarketStore.CLEMParentName + ".";
                             else
-                            {
-                                market = this.CLEMParentName + ".";
-                            }
+                                market = CLEMParentName + ".";
                         }
-                        string warn = $"Cannot report the value of {((converterName.Contains("gain"))?"gains":"losses")} for [r={market}{this.Parent.Name}.{this.Name}]";
+
+                        string warn = $"Cannot report the value of {((converterName.Contains("gain"))?"gains":"losses")} for [r={market}{Parent.Name}.{Name}]";
                         warn += $" in [o=ResourceLedger] as no [{((converterName.Contains("gain")) ? "purchase" : "sale")}] pricing has been provided.";
                         warn += $"\r\nInclude [r=ResourcePricing] component with [{((converterName.Contains("gain")) ? "purchases" : "sales")}] to resource to include all finance conversions";
-                        if (!Warnings.Exists(warn) & Summary != null)
-                        {
-                            Summary.WriteWarning(this, warn);
-                            Warnings.Add(warn);
-                        }
+                        if (Summary != null)
+                            Warnings.CheckAndWrite(warn, Summary, this, MessageType.Error);
                     }
                 }
                 return null;
@@ -198,17 +193,16 @@ namespace Models.CLEM.Resources
                     double result = amount;
                     // convert to edible proportion for all HumanFoodStore converters
                     // this assumes these are all nutritional. Price will be handled above.
-                    if(this.GetType() == typeof(HumanFoodStoreType))
-                    {
+                    if(GetType() == typeof(HumanFoodStoreType))
                         result *= (this as HumanFoodStoreType).EdibleProportion;
-                    }
+
                     return result * converter.Factor;
                 }
                 else
                 {
-                    string warning = "Unable to find the required unit converter [r=" + converterName + "] in resource [r=" + this.Name + "]";
+                    string warning = "Unable to find the required unit converter [r=" + converterName + "] in resource [r=" + Name + "]";
                     Warnings.Add(warning);
-                    Summary.WriteWarning(this, warning);
+                    Summary.WriteMessage(this, warning, MessageType.Warning);
                     return null;
                 }
             }
@@ -233,13 +227,9 @@ namespace Models.CLEM.Resources
         {
             ResourceUnitsConverter converter = this.FindAllChildren<ResourceUnitsConverter>().Where(a => a.Name.ToLower() == converterName.ToLower()).FirstOrDefault() as ResourceUnitsConverter;
             if (converter is null)
-            {
                 return 0;
-            }
             else
-            {
                 return converter.Factor;
-            }
         }
 
         /// <summary>
@@ -248,25 +238,23 @@ namespace Models.CLEM.Resources
         protected void FindEquivalentMarketStore()
         {
             // determine what resource types allow market transactions
-            switch (this.GetType().Name)
+            switch (this)
             {
-                case "FinanceType":
-                case "HumanFoodStoreType":
-                //case "WaterType":
-                //case "AnimalFoodType":
-                //case "EquipmentType":
-                //case "GreenhousGasesType":
-                case "ProductStoreType":
+                case FinanceType _:
+                case HumanFoodStoreType _:
+                case AnimalFoodStoreType _:
+                //ToDo: add WaterType AnimalFoodType EquipmentType GreenhousGasesType _: as needed
+                case ProductStoreType _:
                     break;
                 default:
-                    throw new NotImplementedException($"\r\n[r={this.Parent.GetType().Name}] resource does not currently support transactions to and from a [m=Market]\r\nThis problem has arisen because a resource transaction in the code is flagged to exchange resources with the [m=Market]\r\nPlease contact developers for assistance.");
+                    throw new NotImplementedException($"[r={Parent.GetType().Name}] resource does not currently support transactions to and from a [m=Market]\r\nThis problem has arisen because a resource transaction in the code is flagged to exchange resources [r={this.Name}] with the [m=Market]\r\nPlease contact developers for assistance.");
             }
 
             // if not already checked
-            if(!EquivalentMarketStoreDetermined)
+            if (!EquivalentMarketStoreDetermined)
             {
                 // haven't already found a market store
-                if(EquivalentMarketStore is null)
+                if (EquivalentMarketStore is null)
                 {
                     ResourcesHolder holder = FindAncestor<ResourcesHolder>();
                     // is there a market
@@ -274,9 +262,7 @@ namespace Models.CLEM.Resources
                     {
                         IResourceWithTransactionType store = holder.FoundMarket.Resources.LinkToMarketResourceType(this);
                         if (store != null)
-                        {
                             EquivalentMarketStore = store as CLEMResourceTypeBase;
-                        }
                     }
                 }
                 EquivalentMarketStoreDetermined = true;
@@ -284,9 +270,59 @@ namespace Models.CLEM.Resources
         }
 
         /// <summary>
+        /// Last transaction received
+        /// </summary>
+        public ResourceTransaction LastTransaction { get; set; }
+
+        /// <summary>
+        /// Bank account transaction occured
+        /// </summary>
+        public virtual event EventHandler TransactionOccurred;
+
+        /// <summary>
         /// Amount of last gain transaction
         /// </summary>
+        [JsonIgnore]
         public double LastGain { get; set; }
+
+        /// <summary>
+        /// Report a transaction with details for reporting
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="amount"></param>
+        /// <param name="activity"></param>
+        /// <param name="relatesToResource"></param>
+        /// <param name="category"></param>
+        /// <param name="resource"></param>
+        /// <param name="extraInformation"></param>
+        public void ReportTransaction(TransactionType type, double amount, CLEMModel activity, string relatesToResource, string category, CLEMResourceTypeBase resource, object extraInformation = null)
+        {
+            //ResourceBaseWithTransactions parent = FindAncestor<ResourceBaseWithTransactions>();
+            if (parent != null)
+            {
+                // update the last transaction object of parent
+                parent.LastTransaction.TransactionType = type;
+                parent.LastTransaction.Amount = amount;
+                parent.LastTransaction.Activity = activity;
+                parent.LastTransaction.RelatesToResource = relatesToResource;
+                parent.LastTransaction.Category = category;
+                parent.LastTransaction.ResourceType = resource;
+
+                if (type == TransactionType.Gain)
+                    LastGain = amount;
+
+                LastTransaction = parent.LastTransaction;
+                TransactionOccurred?.Invoke(this, null);
+            }
+        }
+
+        /// <summary>
+        /// Handles reporting of transactions
+        /// </summary>
+        public void PerformTransactionOccurred()
+        {
+            TransactionOccurred?.Invoke(this, null);
+        }
 
         /// <summary>
         /// Add resources from various objects
@@ -318,12 +354,8 @@ namespace Models.CLEM.Resources
             throw new NotImplementedException();
         }
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             string html = "";
             return html;

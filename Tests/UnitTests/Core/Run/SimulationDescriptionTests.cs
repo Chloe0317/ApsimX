@@ -34,12 +34,12 @@
             sim.ParentAllDescendants();
 
             var simulationDescription = new SimulationDescription(sim, "CustomName");
-            simulationDescription.AddOverride(new PropertyReplacement("Weather.MaxT", 2));
+            simulationDescription.AddOverride(new Overrides.Override("Weather.MaxT", 2, Overrides.Override.MatchTypeEnum.NameAndType));
 
             var newSim = simulationDescription.ToSimulation();
 
             var weather = newSim.Children[0] as MockWeather;
-            Assert.AreEqual(weather.MaxT, 2);
+            Assert.That(weather.MaxT, Is.EqualTo(2));
         }
 
         /// <summary>Ensure a model override work.</summary>
@@ -69,16 +69,16 @@
             };
             
             var simulationDescription = new SimulationDescription(sim, "CustomName");
-            simulationDescription.AddOverride(new ModelReplacement("Weather", replacementWeather));
+            simulationDescription.AddOverride(new Overrides.Override("Weather", replacementWeather, Overrides.Override.MatchTypeEnum.NameAndType));
 
             var newSim = simulationDescription.ToSimulation();
-            Assert.AreEqual(newSim.Name, "CustomName");
+            Assert.That(newSim.Name, Is.EqualTo("CustomName"));
 
             var weather = newSim.Children[0] as MockWeather;
-            Assert.AreEqual(weather.MaxT, 2);
+            Assert.That(weather.MaxT, Is.EqualTo(2));
 
             // The name of the new model should be the same as the original model.
-            Assert.AreEqual(weather.Name, "Weather");
+            Assert.That(weather.Name, Is.EqualTo("Weather"));
         }
 
         /// <summary>Ensure a model replacement override work.</summary>
@@ -89,7 +89,7 @@
             {
                 Children = new List<IModel>()
                 {
-                    new Replacements()
+                    new Folder()
                     {
                         Name = "Replacements",
                         Children = new List<IModel>()
@@ -125,13 +125,13 @@
 
             var newSim = simulationDescription.ToSimulation();
             var weather = newSim.Children[0] as MockWeather;
-            Assert.AreEqual(weather.MaxT, 2);
+            Assert.That(weather.MaxT, Is.EqualTo(2));
 
             // Make sure any property overrides happens after a model replacement.
-            simulationDescription.AddOverride(new PropertyReplacement("Weather.MaxT", 3));
+            simulationDescription.AddOverride(new Overrides.Override("Weather.MaxT", 3, Overrides.Override.MatchTypeEnum.NameAndType));
             newSim = simulationDescription.ToSimulation();
             weather = newSim.Children[0] as MockWeather;
-            Assert.AreEqual(weather.MaxT, 3);
+            Assert.That(weather.MaxT, Is.EqualTo(3));
 
         }
 
@@ -181,10 +181,14 @@
             var weather = newSim.Children[0] as MockWeather;
 
             // Name ('Dummy name') didn't match so property should still be 1.
-            Assert.AreEqual(weather.MaxT, 1);
+            Assert.That(weather.MaxT, Is.EqualTo(1));
         }
 
-        /// <summary>Ensure the soil in a simulation is standardised when ToSimulation is called.</summary>
+        /// <summary>
+        /// Ensure the soil in a simulation is NOT standardised when ToSimulation is called.
+        /// This cannot happen during ToSimulation(), as we need to wait until disabled
+        /// models have been removed and other property/model replacements have been applied.
+        /// </summary>
         [Test]
         public void EnsureSoilIsStandardised()
         {
@@ -222,24 +226,17 @@
                                 Thickness = new double[] { 100, 300 },
                                 Carbon = new double[] { 2, 1 }
                             },
-                            new Chemical
+                            new Solute
                             {
+                                Name = "CL",
                                 Thickness = new double[] { 100, 200 },
-                                CL = new double[] { 38, double.NaN }
+                                InitialValues = new double[] { 38, double.NaN },
+                                InitialValuesUnits = Solute.UnitsEnum.ppm
                             },
-                            new Sample
+                            new Water
                             {
                                 Thickness = new double[] { 500 },
-                                SW = new double[] { 0.103 },
-                                OC = new double[] { 1.35 },
-                                SWUnits = Sample.SWUnitsEnum.Gravimetric
-                            },
-                            new Sample
-                            {
-                                Thickness = new double[] { 1000 },
-                                NO3 = new double[] { 27 },
-                                OC = new double[] { 1.35 },
-                                SWUnits = Sample.SWUnitsEnum.Volumetric
+                                InitialValues = new double[] { 0.103 },
                             },
                             new CERESSoilTemperature(),
                         }
@@ -250,6 +247,7 @@
 
             var originalSoil = sim.Children[0] as Soil;
             var originalWater = originalSoil.Children[0] as Physical;
+            var originalSoilOM = originalSoil.Children[2] as Organic;
 
             originalSoil.OnCreated();
             
@@ -257,17 +255,13 @@
 
             var newSim = simulationDescription.ToSimulation();
 
-            var water = newSim.Children[0].Children[0] as Physical;
+            var physical = newSim.Children[0].Children[0] as Physical;
             var soilOrganicMatter = newSim.Children[0].Children[2] as Organic;
-            var sample = newSim.Children[0].Children[4] as Sample;
+            var water = newSim.Children[0].Children[4] as Water;
 
             // Make sure layer structures have been standardised.
-            Assert.AreEqual(water.Thickness, originalWater.Thickness);
-            Assert.AreEqual(soilOrganicMatter.Thickness, originalWater.Thickness);
-            Assert.AreEqual(sample.Thickness, originalWater.Thickness);
-
-            // Make sure sample units are volumetric.
-            Assert.AreEqual(sample.SWUnits, Sample.SWUnitsEnum.Volumetric);
+            Assert.That(physical.Thickness, Is.EqualTo(originalWater.Thickness), "soilwat thickness is incorrect");
+            Assert.That(soilOrganicMatter.Thickness, Is.EqualTo(originalSoilOM.Thickness), "soil OM thickness is incorrect");
         }
 
         /// <summary>
@@ -279,18 +273,16 @@
         public void TestMultipleModelReplacements()
         {
             string json = ReflectionUtilities.GetResourceAsString("UnitTests.Core.Run.MultipleReplacements.apsimx");
-            Simulations sims = FileFormat.ReadFromString<Simulations>(json, out List<Exception> errors);
-            if (errors != null && errors.Count > 0)
-                throw errors[0];
+            Simulations sims = FileFormat.ReadFromString<Simulations>(json, e => throw e, false).NewModel as Simulations;
 
             Runner runner = new Runner(sims);
-            errors = runner.Run();
+            List<Exception> errors = runner.Run();
 
             // The above should throw. The simulations contains a replacements node which
             // replaces wheat's cultivars folder, giving axe an invalid parameter. We sow
             // axe in this sim, so we should get an error when the plant is sown.
-            Assert.NotNull(errors);
-            Assert.AreEqual(1, errors.Count);
+            Assert.That(errors, Is.Not.Null);
+            Assert.That(errors.Count, Is.EqualTo(1));
         }
     }
 }

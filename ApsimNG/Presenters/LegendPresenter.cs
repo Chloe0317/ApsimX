@@ -8,8 +8,8 @@
     using Models.Core;
     using Views;
 
-    using Orientation = Models.Graph.LegendOrientationType;
-    using Position = Models.Graph.LegendPositionType;
+    using Orientation = APSIM.Shared.Graphing.LegendOrientation;
+    using Position = APSIM.Shared.Graphing.LegendPosition;
 
     /// <summary>
     /// This presenter connects an instance of a Model.Graph.Axis with a 
@@ -70,7 +70,7 @@
 
             // Tell the view to populate the axis.
             this.PopulateView();
-        
+
             // Trap events from the view.
             this.view.LegendInsideGraphChanged += this.OnLegendInsideGraphChanged;
             this.view.OrientationDropDown.Changed += OnOrientationChanged;
@@ -97,11 +97,13 @@
             view.PositionDropDown.Values = positions;
             view.OrientationDropDown.SelectedValue = graph.LegendOrientation.ToString();
             view.PositionDropDown.SelectedValue = graph.LegendPosition.ToString();
+            view.LegendInsideGraph = !graph.LegendOutsideGraph;
 
             List<string> seriesNames = this.GetSeriesNames();
             this.view.SetSeriesNames(seriesNames.ToArray());
             if (graph.DisabledSeries != null)
-                this.view.SetDisabledSeriesNames(this.graph.DisabledSeries.ToArray());
+                if (graph.DisabledSeries.Count() > 0)
+                    this.view.SetDisabledSeriesNames(this.graph.DisabledSeries.ToArray());
 
             this.view.DisabledSeriesChanged += this.OnDisabledSeriesChanged;
         }

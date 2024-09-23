@@ -1,28 +1,27 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Core.Run;
+using Models.Interfaces;
+using Models.Storage;
+using Models.Utilities;
+using Newtonsoft.Json;
+
+namespace Models
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Factorial;
-    using Models.Interfaces;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.IO;
-    using Newtonsoft.Json;
-    using Utilities;
-    using Models.Storage;
-    using Models.Core.Run;
 
     /// <summary>
-    /// # [Name]
     /// Encapsulates a factorial ANOVA parameter sensitivity analysis.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.DualGridView")]
-    [PresenterName("UserInterface.Presenters.TablePresenter")]
+    [PresenterName("UserInterface.Presenters.PropertyPresenter")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [ValidParent(ParentType = typeof(Simulations))]
     [ValidParent(ParentType = typeof(Folder))]
-    public class FactorialAnova : Model, ICustomDocumentation, IModelAsTable, IPostSimulationTool
+    public class FactorialAnova : Model, IPostSimulationTool
     {
         [Link]
         private IDataStore dataStore = null;
@@ -30,11 +29,15 @@
         /// <summary>
         /// List of analysis outputs
         /// </summary>
+        [Description("Analysis outputs")]
+        [Display(Type = DisplayType.MultiLineText)]
         public List<string> Outputs { get; set; }
 
         /// <summary>
         /// List of analysis inputs
         /// </summary>
+        [Description("Analysis inputs")]
+        [Display(Type = DisplayType.MultiLineText)]
         public List<string> Inputs { get; set; }
 
         /// <summary>
@@ -52,69 +55,6 @@
         {
             Outputs = new List<string>();
             Inputs = new List<string>();
-        }
-
-        /// <summary>
-        /// Gets or sets the table of values.
-        /// </summary>
-        [JsonIgnore]
-        public List<DataTable> Tables
-        {
-            get
-            {
-                List<DataTable> tables = new List<DataTable>();
-
-                // Add an inputs table
-                DataTable inputTable = new DataTable();
-                inputTable.Columns.Add("Inputs", typeof(string));
-
-                foreach (string input in Inputs)
-                {
-                    DataRow rowIn = inputTable.NewRow();
-                    rowIn["Inputs"] = input;
-                    inputTable.Rows.Add(rowIn);
-                }
-
-                tables.Add(inputTable);
-
-                // Add an outputs table.
-                DataTable outputTable = new DataTable();
-                outputTable.Columns.Add("Outputs", typeof(string));
-
-                foreach (string output in Outputs)
-                {
-                    DataRow rowOut = outputTable.NewRow();
-                    rowOut["Outputs"] = output;
-                    outputTable.Rows.Add(rowOut);
-                }
-
-                tables.Add(outputTable);
-
-                return tables;
-            }
-            set
-            {
-
-                Inputs.Clear();
-                Outputs.Clear();
-                foreach (DataRow row in value[1].Rows)
-                {
-                    string output = null;
-                    if (!Convert.IsDBNull(row["Outputs"]))
-                        output = row["Outputs"].ToString();
-                    if (output != null)
-                        Outputs.Add(output);
-                }
-
-                foreach (DataRow row in value[0].Rows)
-                {
-                    string input = null;
-                    if (!Convert.IsDBNull(row["Inputs"]))
-                        input = row["Inputs"].ToString();
-                    if (input != null)
-                        Inputs.Add(input);
-                }
-            }
         }
 
         /// <summary>Main run method for performing our post simulation calculations</summary>
@@ -195,26 +135,6 @@
         private string GetTempFileName(string name, string extension)
         {
             return Path.ChangeExtension(Path.Combine(Path.GetTempPath(), name + id), extension);
-        }
-
-
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        /// <param name="tags">The list of tags to add to.</param>
-        /// <param name="headingLevel">The level (e.g. H2) of the headings.</param>
-        /// <param name="indent">The level of indentation 1, 2, 3 etc.</param>
-        public void Document(List<AutoDocumentation.ITag> tags, int headingLevel, int indent)
-        {
-            if (IncludeInDocumentation)
-            {
-                // add a heading.
-                tags.Add(new AutoDocumentation.Heading(Name, headingLevel));
-
-                foreach (IModel child in Children)
-                {
-                    if (!(child is Simulation) && !(child is Factors))
-                        AutoDocumentation.DocumentModel(child, tags, headingLevel + 1, indent);
-                }
-            }
         }
     }
 }

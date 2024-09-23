@@ -1,10 +1,8 @@
-﻿using Models.Core;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
+﻿using Models.CLEM.Interfaces;
+using Models.Core;
 using Newtonsoft.Json;
+using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace Models.CLEM.Resources
 {
@@ -75,6 +73,11 @@ namespace Models.CLEM.Resources
         public double Growth { get; set; }
 
         /// <summary>
+        /// Name of component
+        /// </summary>
+        public string Name { get; set; }
+
+        /// <summary>
         /// pricing
         /// </summary>
         public ResourcePricing Price(PurchaseOrSalePricingStyleType priceStyle)
@@ -82,9 +85,22 @@ namespace Models.CLEM.Resources
             return null;
         }
 
+
+        /// <summary>
+        /// Total value of resource
+        /// </summary>
+        public double? Value
+        {
+            get
+            {
+                return null;
+            }
+        }
+
         /// <summary>
         /// Get the amount of the last gain in this resource 
         /// </summary>
+        [JsonIgnore]
         public double LastGain { get; set; }
 
         /// <summary>
@@ -173,7 +189,7 @@ namespace Models.CLEM.Resources
         public void Set(double newAmount)
         {
             this.amount = Math.Max(0, newAmount);
-        } 
+        }
         #endregion
 
     }

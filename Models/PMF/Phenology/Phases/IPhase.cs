@@ -1,28 +1,27 @@
+using Models.Core;
 
 namespace Models.PMF.Phen
 {
-    using System.IO;
-    
+
     /// <summary>Interface for a function</summary>
-    public interface IPhase
+    public interface IPhase : IModel
     {
-        /// <summary>The plases name</summary>
-        string Name { get; }
-        
         /// <summary>The start</summary>
-        string Start { get; set; }
+        string Start { get; }
 
         /// <summary>The end</summary>
-        string End { get; set; }
+        string End { get; }
 
         /// <summary>This function returns a non-zero value if the phase target is met today </summary>
         bool DoTimeStep(ref double PropOfDayToUse);
 
         /// <summary> Fraction of progress through the phase</summary>
-        double FractionComplete { get;}
+        double FractionComplete { get; }
 
         /// <summary>Resets the phase.</summary>
         void ResetPhase();
 
+        /// <summary>Is the phase emerged from the ground?</summary>
+        bool IsEmerged { get; }
     }
 }

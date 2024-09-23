@@ -1,21 +1,23 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using APSIM.Shared.Documentation;
 using Models.Core;
 using Models.Functions;
-using Models.PMF.Phen;
-using Models.PMF.Interfaces;
-using Newtonsoft.Json;
-using Models.PMF.Library;
 using Models.Interfaces;
+using Models.PMF.Interfaces;
+using Models.PMF.Library;
+using Models.PMF.Phen;
+using Newtonsoft.Json;
 
 namespace Models.PMF.Organs
 {
     /// <summary>
-    /// # [Name] 
     /// This organ uses a generic model for plant reproductive components.  Yield is calculated from its components in terms of organ number and size (for example, grain number and grain size).  
     /// </summary>
     [Serializable]
     [ValidParent(ParentType = typeof(Plant))]
-    public class ReproductiveOrgan : Model, IOrgan, IArbitration, IOrganDamage
+    public class ReproductiveOrgan : Model, IOrgan, IArbitration, IOrganDamage, IHasDamageableBiomass
     {
         /// <summary>The surface organic matter model</summary>
         [Link]
@@ -61,9 +63,6 @@ namespace Models.PMF.Organs
         /// <summary>The dry matter demand</summary>
         public BiomassPoolType DMDemand { get; set; }
 
-        /// <summary>The dry matter demand</summary>
-        public BiomassPoolType DMDemandPriorityFactor { get; set; }
-
         /// <summary>Structural nitrogen demand</summary>
         public BiomassPoolType NDemand { get; set; }
 
@@ -83,7 +82,7 @@ namespace Models.PMF.Organs
         [Units("g/g")]
         [Description("Water content used to calculate a fresh weight.")]
         IFunction WaterContent = null;
-           
+
         /// <summary>The number function</summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("/m2")]
@@ -93,17 +92,17 @@ namespace Models.PMF.Organs
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/m2/d")]
         IFunction NFillingRate = null;
-        
+
         /// <summary>The maximum n conc</summary>
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/g")]
         IFunction MaximumNConc = null;
         /// <summary>The minimum n conc</summary>
-        
+
         [Link(Type = LinkType.Child, ByName = true)]
         [Units("g/g")]
         IFunction MinimumNConc = null;
-        
+
         /// <summary>Carbon concentration</summary>
         [Units("g/g")]
         [Link(Type = LinkType.Child, ByName = true)]
@@ -133,12 +132,17 @@ namespace Models.PMF.Organs
         [Units("g/g")]
         public IFunction RemobilisationCost = null;
 
+        /// <summary>Factors for assigning priority to DM demands</summary>
+        [Link(Type = LinkType.Child, ByName = true)]
+        [Units("g/m2/d")]
+        private NutrientPoolFunctions dmDemandPriorityFactors = null;
+
         /// <summary>The ripe stage</summary>
         [Description("Stage at which this organ becomes ripe")]
         public string RipeStage { get; set; }
         /// <summary>The _ ready for harvest</summary>
         protected bool _ReadyForHarvest = false;
-        
+
         /// <summary>The dry matter potentially being allocated</summary>
         public BiomassPoolType potentialDMAllocation { get; set; }
 
@@ -147,13 +151,13 @@ namespace Models.PMF.Organs
 
         /// <summary>The dead biomass</summary>
         public Biomass Dead { get; set; }
-        
+
         /// <summary>Gets a value indicating whether the biomass is above ground or not</summary>
         public bool IsAboveGround { get { return true; } }
 
         /// <summary>The number</summary>
         [JsonIgnore]
-        [Units("/m^2")]
+        [Units("g/m^2")]
         public double Number { get; set; }
 
         /// <summary>Gets the live fresh weight of grains.</summary>
@@ -248,7 +252,7 @@ namespace Models.PMF.Organs
         [EventSubscribe("DoDailyInitialisation")]
         protected void OnDoDailyInitialisation(object sender, EventArgs e)
         {
-            if (parentPlant.IsAlive || parentPlant.IsEnding)
+            if (parentPlant.IsAlive)
                 ClearBiomassFlows();
         }
 
@@ -258,12 +262,12 @@ namespace Models.PMF.Organs
         [EventSubscribe("Cutting")]
         private void OnCutting(object sender, EventArgs e)
         {
-                Summary.WriteMessage(this, "Cutting " + Name + " from " + parentPlant.Name);
+            Summary.WriteMessage(this, "Cutting " + Name + " from " + parentPlant.Name, MessageType.Diagnostic);
 
-                Live.Clear();
-                Dead.Clear();
-                Number = 0;
-                _ReadyForHarvest = false;
+            Live.Clear();
+            Dead.Clear();
+            Number = 0;
+            _ReadyForHarvest = false;
         }
 
         /// <summary>Called when crop is ending</summary>
@@ -286,6 +290,9 @@ namespace Models.PMF.Organs
         private void SetDMDemand(object sender, EventArgs e)
         {
             DMDemand.Structural = DMDemandFunction.Value() / DMConversionEfficiency.Value();
+            DMDemand.QStructuralPriority = dmDemandPriorityFactors.Structural.Value();
+            DMDemand.QMetabolicPriority = dmDemandPriorityFactors.Metabolic.Value();
+            DMDemand.QStoragePriority = dmDemandPriorityFactors.Storage.Value();
         }
 
         /// <summary>Calculate and return the nitrogen demand (g/m2)</summary>
@@ -303,21 +310,7 @@ namespace Models.PMF.Organs
         [EventSubscribe("Commencing")]
         protected void OnSimulationCommencing(object sender, EventArgs e)
         {
-            Live = new Biomass();
-            Dead = new Biomass();
-            DMDemand = new BiomassPoolType();
-            DMDemandPriorityFactor = new BiomassPoolType();
-            DMDemandPriorityFactor.Structural = 1.0;
-            DMDemandPriorityFactor.Metabolic = 1.0;
-            DMDemandPriorityFactor.Storage = 1.0;
-            NDemand = new BiomassPoolType();
-            DMSupply = new BiomassSupplyType();
-            NSupply = new BiomassSupplyType();
-            potentialDMAllocation = new BiomassPoolType();
-            Allocated = new Biomass();
-            Senesced = new Biomass();
-            Detached = new Biomass();
-            Removed = new Biomass();
+            Clear();
         }
 
 
@@ -405,12 +398,55 @@ namespace Models.PMF.Organs
             }
         }
 
-        /// <summary>Removes biomass from organs when harvest, graze or cut events are called.</summary>
-        /// <param name="biomassRemoveType">Name of event that triggered this biomass remove call.</param>
-        /// <param name="amountToRemove">The fractions of biomass to remove</param>
-        public void RemoveBiomass(string biomassRemoveType, OrganBiomassRemovalType amountToRemove)
+        /// <summary>A list of material (biomass) that can be damaged.</summary>
+        public IEnumerable<DamageableBiomass> Material
         {
-            biomassRemovalModel.RemoveBiomass(biomassRemoveType, amountToRemove, Live, Dead, Removed, Detached);
+            get
+            {
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Live, true);
+                yield return new DamageableBiomass($"{Parent.Name}.{Name}", Dead, false);
+            }
+        }
+
+        /// <summary>Remove biomass from organ.</summary>
+        /// <param name="liveToRemove">Fraction of live biomass to remove from simulation (0-1).</param>
+        /// <param name="deadToRemove">Fraction of dead biomass to remove from simulation (0-1).</param>
+        /// <param name="liveToResidue">Fraction of live biomass to remove and send to residue pool(0-1).</param>
+        /// <param name="deadToResidue">Fraction of dead biomass to remove and send to residue pool(0-1).</param>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double RemoveBiomass(double liveToRemove, double deadToRemove, double liveToResidue, double deadToResidue)
+        {
+            return biomassRemovalModel.RemoveBiomass(liveToRemove, deadToRemove, liveToResidue, deadToResidue, Live, Dead, Removed, Detached);
+        }
+
+        /// <summary>Harvest the organ.</summary>
+        /// <returns>The amount of biomass (live+dead) removed from the plant (g/m2).</returns>
+        public double Harvest()
+        {
+            return RemoveBiomass(biomassRemovalModel.HarvestFractionLiveToRemove, biomassRemovalModel.HarvestFractionDeadToRemove,
+                                 biomassRemovalModel.HarvestFractionLiveToResidue, biomassRemovalModel.HarvestFractionDeadToResidue);
+        }
+
+        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
+        public override IEnumerable<ITag> Document()
+        {
+            foreach (var tag in GetModelDescription())
+                yield return tag;
+
+            foreach (var tag in DocumentChildren<Memo>())
+                yield return tag;
+
+            // Document Constants
+            var constantTags = new List<ITag>();
+            foreach (var constant in FindAllChildren<Constant>())
+                foreach (var tag in constant.Document())
+                    constantTags.Add(tag);
+            yield return new Section("Constants", constantTags);
+
+            // Document everything else.
+            foreach (var child in Children.Where(child => !(child is Constant) && !(child is Memo)))
+                yield return new Section(child.Name, child.Document());
+
         }
 
         /// <summary>Clears this instance.</summary>
@@ -418,6 +454,17 @@ namespace Models.PMF.Organs
         {
             Live = new Biomass();
             Dead = new Biomass();
+            DMDemand = new BiomassPoolType();
+            NDemand = new BiomassPoolType();
+            DMSupply = new BiomassSupplyType();
+            NSupply = new BiomassSupplyType();
+            potentialDMAllocation = new BiomassPoolType();
+            Allocated = new Biomass();
+            Senesced = new Biomass();
+            Detached = new Biomass();
+            Removed = new Biomass();
+            GrowthRespiration = 0;
+            Number = 0;
         }
 
         /// <summary>Clears the transferring biomass amounts.</summary>

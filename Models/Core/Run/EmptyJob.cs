@@ -1,21 +1,32 @@
-﻿using APSIM.Shared.JobRunning;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System;
+using APSIM.Shared.JobRunning;
 
 namespace Models.Core.Run
 {
     [Serializable]
     class EmptyJob : IRunnable
     {
+        /// <summary>
+        /// Prepare the job for running.
+        /// </summary>
+        public void Prepare()
+        {
+            // Do nothing.
+        }
+
         /// <summary>Called to start the job. Can throw on error.</summary>
         /// <param name="cancelToken">Is cancellation pending?</param>
         public void Run(System.Threading.CancellationTokenSource cancelToken)
         {
             //do nothing
+        }
+
+        /// <summary>
+        /// Cleanup the job after running it.
+        /// </summary>
+        public void Cleanup(System.Threading.CancellationTokenSource cancelToken)
+        {
+            // Do nothing.
         }
 
         /// <summary>

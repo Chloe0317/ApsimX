@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using APSIM.Shared.Utilities;
 using Gdk;
 using Gtk;
@@ -10,29 +11,13 @@ using Markdig;
 using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using Pango;
 using UserInterface.Extensions;
 using Utility;
-using Pango;
-using UserInterface.Classes;
 using Table = Markdig.Extensions.Tables.Table;
-#if NETCOREAPP
-using StateType = Gtk.StateFlags;
-#endif
 
 namespace UserInterface.Views
 {
-    /// <summary>An interface for a rich text widget.</summary>
-    public interface IMarkdownView
-    {
-        /// <summary>Gets or sets the base path that images should be relative to.</summary>
-        string ImagePath { get; set; }
-
-        /// <summary>Gets or sets the markdown text</summary>
-        string Text { get; set; }
-
-        /// <summary>Gets or sets the visibility of the widget.</summary>
-        bool Visible { get; set; }
-    }
 
     /// <summary>A rich text view capable of rendering markdown-formatted text.</summary>
     public class MarkdownView : ViewBase, IMarkdownView
@@ -53,8 +38,19 @@ namespace UserInterface.Views
 
         private TextView textView;
         private Cursor handCursor;
-		private Cursor regularCursor;
+        private Cursor regularCursor;
         private MarkdownFindView findView;
+        private AccelGroup accelerators = new AccelGroup();
+        private Menu popupMenu = new Menu();
+
+        /// <summary>Table of font sizes for ASCII characters. Set on attach and reset on attach whenver font has changed.</summary>
+        private static readonly int[] fontCharSizes = new int[128];
+
+        /// <summary>Table of font sizes for unicode symbols not in ascii. Dynamically filled, cleared on attach when font changed.</summary>
+        private static readonly Dictionary<Rune, int> nonASCIICharSizes = new();
+
+        /// <summary>The font name and point size. Used to determine whether or not the font has changed.</summary>
+        private static string fontName = "";
 
         /// <summary>Constructor</summary>
         public MarkdownView() { }
@@ -62,7 +58,7 @@ namespace UserInterface.Views
         /// <summary>Constructor</summary>
         public MarkdownView(ViewBase owner) : base(owner)
         {
-            Initialise(owner, new TextView());
+            Initialise(owner, new ScrolledWindow());
         }
 
         /// <summary>Constructor</summary>
@@ -82,7 +78,33 @@ namespace UserInterface.Views
         protected override void Initialise(ViewBase ownerView, GLib.Object gtkControl)
         {
             base.Initialise(ownerView, gtkControl);
-            textView = (TextView)gtkControl;
+
+            if (fontName != Configuration.Settings.FontName)
+            {
+                fontName = Configuration.Settings.FontName;
+                Label helper = new();
+                helper.Layout.FontDescription = FontDescription.FromString(fontName);
+                for (int i = 32; i < 127; i++)
+                {
+                    helper.Layout.SetText(((char)i).ToString());
+                    helper.Layout.GetPixelSize(out var width, out _);
+                    fontCharSizes[i] = width;
+                }
+                nonASCIICharSizes.Clear();
+            }
+
+            if (gtkControl is ScrolledWindow scroller)
+            {
+                textView = new TextView();
+                scroller.Add(textView);
+                mainWidget = scroller;
+            }
+            else
+            {
+                textView = (TextView)gtkControl;
+                mainWidget = textView;
+            }
+            mainWidget.Margin = 10;
             textView.PopulatePopup += OnPopulatePopupMenu;
             findView = new MarkdownFindView();
 
@@ -92,14 +114,76 @@ namespace UserInterface.Views
             textView.MotionNotifyEvent += OnMotionNotify;
             textView.WidgetEventAfter += OnWidgetEventAfter;
             CreateStyles(textView);
-            mainWidget = textView;
             mainWidget.ShowAll();
             mainWidget.Destroyed += OnDestroyed;
+            mainWidget.Realized += OnRealized;
+            textView.FocusInEvent += OnGainFocus;
+            textView.FocusOutEvent += OnLoseFocus;
 
-            handCursor = new Gdk.Cursor(Gdk.CursorType.Hand2);
-            regularCursor = new Gdk.Cursor(Gdk.CursorType.Xterm);
-            
+            handCursor = new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Hand2);
+            regularCursor = new Gdk.Cursor(Gdk.Display.Default, Gdk.CursorType.Xterm);
+
             textView.KeyPressEvent += OnTextViewKeyPress;
+        }
+
+        /// <summary>
+        /// Called when the text editor loses keyboard focus.
+        /// </summary>
+        /// <param name="sender">Sender object.</param>
+        /// <param name="args">Event data.</param>
+        private void OnLoseFocus(object sender, FocusOutEventArgs args)
+        {
+            try
+            {
+                if (mainWidget.Toplevel is Gtk.Window window)
+                    window.RemoveAccelGroup(accelerators);
+            }
+            catch (Exception err)
+            {
+                ShowError(err);
+            }
+        }
+
+        /// <summary>
+        /// Called when the text editor gains keyboard focus.
+        /// </summary>
+        /// <param name="sender">Sender object.</param>
+        /// <param name="args">Event data.</param>
+        private void OnGainFocus(object sender, FocusInEventArgs args)
+        {
+            try
+            {
+                if (mainWidget.Toplevel is Gtk.Window window)
+                    window.AddAccelGroup(accelerators);
+            }
+            catch (Exception err)
+            {
+                ShowError(err);
+            }
+        }
+
+        /// <summary>
+        /// Context menu items aren't actually added to the context menu until the
+        /// user requests the context menu (ie via right clicking). Keyboard shortcuts
+        /// (accelerators) won't work until this occurs. Therefore, we now manually
+        /// fire off a populate-popup signal to cause the context menu to be populated.
+        /// (This doesn't actually cause the context menu to be displayed.)
+        ///
+        /// We wait until the widget is realized so that the owner of the view has a
+        /// chance to add context menu items.
+        /// </summary>
+        /// <param name="sender">Sender object.</param>
+        /// <param name="args">Event data.</param>
+        private void OnRealized(object sender, EventArgs args)
+        {
+            try
+            {
+                GLib.Signal.Emit(textView, "populate-popup", popupMenu);
+            }
+            catch (Exception err)
+            {
+                ShowError(err);
+            }
         }
 
         /// <summary>
@@ -111,7 +195,7 @@ namespace UserInterface.Views
         {
             try
             {
-                if ( (args.Event.Key == Gdk.Key.F || args.Event.Key == Gdk.Key.f) && args.Event.State == ModifierType.ControlMask)
+                if ((args.Event.Key == Gdk.Key.F || args.Event.Key == Gdk.Key.f) && args.Event.State == ModifierType.ControlMask)
                     findView.ShowFor(this);
             }
             catch (Exception err)
@@ -126,14 +210,13 @@ namespace UserInterface.Views
             try
             {
                 MenuItem option = new MenuItem("Find Text");
+                option.AddAccelerator("activate", accelerators, (uint)Gdk.Key.F, ModifierType.ControlMask, AccelFlags.Visible);
                 option.ShowAll();
                 option.Activated += OnFindText;
-#if NETFRAMEWORK
-                args.Menu.Append(option);
-#else
+
                 if (args.Popup is Menu menu)
                     menu.Append(option);
-#endif
+
             }
             catch (Exception err)
             {
@@ -173,9 +256,8 @@ namespace UserInterface.Views
 
                 if (value != null)
                 {
-                    MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UsePipeTables().UseEmphasisExtras().Build();
+                    MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().UsePipeTables().UseEmphasisExtras().Build();
                     MarkdownDocument document = Markdown.Parse(value, pipeline);
-                    textView.Buffer.Text = string.Empty;
                     TextIter insertPos = textView.Buffer.GetIterAtOffset(0);
                     insertPos = ProcessMarkdownBlocks(document, ref insertPos, textView, 0);
                     mainWidget.ShowAll();
@@ -203,11 +285,12 @@ namespace UserInterface.Views
             // smaller blocks. Therefore, if we just insert newlines at the bottom of this
             // method (ie every time we insert a block), we will end up with scenarios where
             // we have way too many empty lines.
+            Block prevBlock = null;
             foreach (var block in blocks)
             {
                 if (block is HeadingBlock header)
                 {
-                    ProcessMarkdownInlines(header.Inline, ref insertPos, textView, indent, GetTags($"Heading{header.Level}", indent).Union(tags).ToArray());
+                    ProcessMarkdownInlines(header.Inline, ref insertPos, textView, indent, GetTags(textView, $"Heading{header.Level}", indent).Union(tags).ToArray());
                 }
                 else if (block is ParagraphBlock paragraph)
                 {
@@ -219,17 +302,17 @@ namespace UserInterface.Views
                 }
                 else if (block is ListBlock list)
                 {
+                    if (prevBlock is ParagraphBlock) //add special case newline for sublists
+                        textView.Buffer.Insert(ref insertPos, "\n");
+
                     int itemNumber = 1;
                     foreach (Block listBlock in list)
                     {
                         if (list.IsOrdered)
-                        {
-                            textView.Buffer.InsertWithTags(ref insertPos, $"{itemNumber}. ", GetTags("Normal", indent + 1));
-                        }
+                            textView.Buffer.InsertWithTags(ref insertPos, $"{itemNumber}. ", GetTags(textView, "Normal", indent + 1));
                         else
-                        {
-                            textView.Buffer.InsertWithTags(ref insertPos, "• ", GetTags("Normal", indent + 1));
-                        }
+                            textView.Buffer.InsertWithTags(ref insertPos, "• ", GetTags(textView, "Normal", indent + 1));
+
                         ProcessMarkdownBlocks(new[] { listBlock }, ref insertPos, textView, indent + 1, false, tags);
                         if (itemNumber != list.Count)
                             textView.Buffer.Insert(ref insertPos, "\n");
@@ -243,7 +326,7 @@ namespace UserInterface.Views
                 else if (block is CodeBlock code)
                 {
                     string text = code.Lines.ToString().TrimEnd(Environment.NewLine.ToCharArray());
-                    textView.Buffer.InsertWithTags(ref insertPos, text, GetTags("Code", indent + 1).Union(tags).ToArray());
+                    textView.Buffer.InsertWithTags(ref insertPos, text, GetTags(textView, "Code", indent + 1).Union(tags).ToArray());
                 }
                 else if (block is Table table)
                 {
@@ -256,8 +339,11 @@ namespace UserInterface.Views
                 else
                 {
                 }
-                if (autoNewline)
+                // Don't insert auto newlines after the last block in the document.
+                if (autoNewline && !(block.Parent is MarkdownDocument && block.Parent.LastChild == block))
                     textView.Buffer.Insert(ref insertPos, "\n\n");
+
+                prevBlock = block;
             }
 
             return insertPos;
@@ -276,7 +362,7 @@ namespace UserInterface.Views
             foreach (var inline in inlines)
             {
                 if (inline is LiteralInline textInline)
-                    textView.Buffer.InsertWithTags(ref insertPos, textInline.Content.ToString(), tags.Union(GetTags(null, indent)).ToArray());
+                    textView.Buffer.InsertWithTags(ref insertPos, textInline.Content.ToString(), tags.Union(GetTags(textView, null, indent)).ToArray());
                 else if (inline is EmphasisInline italicInline)
                 {
                     string style;
@@ -292,7 +378,7 @@ namespace UserInterface.Views
                             style = italicInline.DelimiterCount == 1 ? "Italic" : "Bold";
                             break;
                     }
-                    ProcessMarkdownInlines(italicInline, ref insertPos, textView, indent, tags.Union(GetTags(style, indent)).ToArray());
+                    ProcessMarkdownInlines(italicInline, ref insertPos, textView, indent, tags.Union(GetTags(textView, style, indent)).ToArray());
                 }
                 else if (inline is LinkInline link)
                 {
@@ -300,12 +386,12 @@ namespace UserInterface.Views
                     if (link.IsImage)
                         DisplayImage(link.Url, link.Label, ref insertPos);
                     else
-                        ProcessMarkdownInlines(link, ref insertPos, textView, indent, tags.Union(GetTags("Link", indent, link.Url)).ToArray());
+                        ProcessMarkdownInlines(link, ref insertPos, textView, indent, tags.Union(GetTags(textView, "Link", indent, link.Url)).ToArray());
                 }
                 //else if (inline is MarkdownLinkInline markdownLinkInline)
                 //    textView.Buffer.InsertWithTags(ref insertPos, markdownLinkInline.Inlines[0].ToString(), GetTags("Link", indent, markdownLinkInline.Url));
                 else if (inline is CodeInline codeInline)
-                    textView.Buffer.InsertWithTags(ref insertPos, codeInline.Content, tags.Union(GetTags(null, indent + 1)).ToArray());
+                    textView.Buffer.InsertWithTags(ref insertPos, codeInline.Content, tags.Union(GetTags(textView, null, indent + 1)).ToArray());
                 else if (inline is LineBreakInline br)
                     textView.Buffer.InsertWithTags(ref insertPos, br.IsHard ? "\n" : " ", tags);
                 else
@@ -322,17 +408,35 @@ namespace UserInterface.Views
         /// <param name="indent"></param>
         private void DisplayTable(ref TextIter insertPos, Table table, int indent)
         {
-            int spaceWidth = MeasureText(" ");
+            int spaceWidth = fontCharSizes[' '];
             // Setup tab stops for the table.
-            TabArray tabs = new TabArray(table.ColumnDefinitions.Count(), true);
+            TabArray tabs = new TabArray(table.ColumnDefinitions.Count, true);
             int cumWidth = 0;
-            Dictionary<int, int> columnWidths = new Dictionary<int, int>();
-            for (int i = 0; i < table.ColumnDefinitions.Count(); i++)
+            Dictionary<int, List<int>> cellLengthsByRow = new();
+            for (int i = 0; i < table.Count; i++)
             {
-                // The i-th tab stop will be set to the cumulative column width
-                // of the first i columns (including padding).
-                columnWidths[i] = GetColumnWidth(table, i);
-                cumWidth += columnWidths[i];
+                var b = table[i];
+                if (b is TableRow tr)
+                {
+                    cellLengthsByRow[i] = tr
+                        .Select(b => GetCellRawText((TableCell)b))
+                        .Select(MeasureText)
+                        .ToList();
+                }
+                else
+                    throw new Exception($"Error when processing Markdown table: {b.GetType()} is not a table row.");
+            }
+
+            int[] columnWidths = new int[table.ColumnDefinitions.Count];
+            for (int i = 0; i < table.ColumnDefinitions.Count; i++)
+            {
+                var columnLength = cellLengthsByRow.Values
+                    .Where(l => l.Count > i)
+                    .Select(l => l[i] + tableColumnPadding)
+                    .DefaultIfEmpty(0)
+                    .Max();
+                columnWidths[i] = columnLength;
+                cumWidth += columnLength;
                 tabs.SetTab(i, TabAlign.Left, cumWidth);
             }
 
@@ -346,7 +450,7 @@ namespace UserInterface.Views
             for (int i = 0; i < table.Count; i++)
             {
                 TableRow row = (TableRow)table[i];
-                for (int j = 0; j < Math.Min(table.ColumnDefinitions.Count(), row.Count); j++)
+                for (int j = 0; j < Math.Min(table.ColumnDefinitions.Count, row.Count); j++)
                 {
                     if (row[j] is TableCell cell)
                     {
@@ -365,7 +469,7 @@ namespace UserInterface.Views
                         if (alignment == TableColumnAlign.Center || alignment == TableColumnAlign.Right)
                         {
                             // Calculate the width of the cell contents.
-                            int cellWidth = MeasureText(GetCellRawText(cell));
+                            int cellWidth = cellLengthsByRow[i][j];
 
                             // Number of whitespace characters we can fit will be the
                             // number of spare pixels in the cell (width of cell - width
@@ -400,61 +504,68 @@ namespace UserInterface.Views
         }
 
         /// <summary>
-        /// Calculate the width (in pixels) of a column in a table.
-        /// This is the width of the widest cell in the column.
-        /// </summary>
-        /// <param name="table">The table.</param>
-        /// <param name="columnIndex">Index of a column in the table.</param>
-        private int GetColumnWidth(Table table, int columnIndex)
-        {
-            int width = 0;
-            for (int i = 0; i < table.Count; i++)
-            {
-                TableRow row = (TableRow)table[i];
-                if (columnIndex < row.Count)
-                {
-                    if (row[columnIndex] is TableCell cell)
-                    {
-                        string cellText = GetCellRawText(cell);
-                        int cellWidth = MeasureText(cellText);
-                        width = Math.Max(width, cellWidth + tableColumnPadding);
-                    }
-                    else
-                        throw new NotImplementedException($"Unknown cell type {row[columnIndex].GetType().Name}.");
-                }
-            }
-            return width;
-        }
-
-        /// <summary>
         /// Get the raw text in a cell.
         /// </summary>
         /// <param name="cell">The cell.</param>
-        private string GetCellRawText(TableCell cell)
+        private static string GetCellRawText(TableCell cell)
         {
-            TextView tmpView = new TextView();
-            CreateStyles(tmpView);
-            TextIter iter = tmpView.Buffer.StartIter;
-            ProcessMarkdownBlocks(cell, ref iter, tmpView, 0, false);
-            string result = tmpView.Buffer.Text;
-            tmpView.Cleanup();
-            return result;
+            StringBuilder sb = new();
+            foreach (var block in cell)
+                ExtractBlockText(block);
+            return sb.ToString();
+
+            void ExtractBlockText(Block block)
+            {
+                if (block is LeafBlock lb)
+                    foreach (var inline in lb.Inline)
+                        ExtractInlineText(inline);
+                else if (block is ContainerBlock cb)
+                    foreach (var innerBlock in cb)
+                        ExtractBlockText(innerBlock);
+                else
+                    throw new NotImplementedException($"Unknown block: {block.GetType()}.");
+            }
+
+            void ExtractInlineText(Inline inline)
+            {
+                if (inline is LiteralInline literal)
+                    sb.Append(literal.Content.AsSpan());
+                else if (inline is ContainerInline ci)
+                    foreach (var il in ci)
+                        ExtractInlineText(il);
+            }
         }
 
         /// <summary>
         /// Measure the width of a string in pixels.
         /// </summary>
         /// <param name="text">The text to be measured.</param>
-        private int MeasureText(string text)
+        private static int MeasureText(string text)
         {
-            Label label = new Label();
-#if NETFRAMEWORK
-            label.Layout.FontDescription = owner.MainWidget.Style.FontDescription;
-#else
-            label.Layout.FontDescription = FontDescription.FromString(Utility.Configuration.Settings.FontName);
-#endif
-            label.Layout.SetText(text);
-            label.Layout.GetPixelSize(out int width, out _);
+            return text.EnumerateRunes().Sum(MeasureRuneSize);
+        }
+
+        /// <summary>
+        /// Measures the size of a unicode rune in pixels.
+        /// </summary>
+        /// <param name="ch">The rune to measure.</param>
+        private static int MeasureRuneSize(Rune ch)
+        {
+            if (ch.IsAscii)
+                return fontCharSizes[ch.Value];
+            // Non-printing variation selector. Gets a pixel size for some reason.
+            if (0xFE00 <= ch.Value && ch.Value <= 0xFE0F)
+                return 0;
+
+            int width;
+            if (!nonASCIICharSizes.TryGetValue(ch, out width))
+            {
+                Label helper = new();
+                helper.Layout.FontDescription = FontDescription.FromString(fontName);
+                helper.Layout.SetText(ch.ToString());
+                helper.Layout.GetPixelSize(out width, out _);
+                nonASCIICharSizes[ch] = width;
+            }
             return width;
         }
 
@@ -483,8 +594,10 @@ namespace UserInterface.Views
             }
 
             if (image != null)
-            { 
-                image.SetAlignment(0, 0);
+            {
+
+                image.Halign = image.Valign = 0;
+
                 if (!string.IsNullOrWhiteSpace(tooltip))
                     image.TooltipText = tooltip;
 
@@ -497,11 +610,12 @@ namespace UserInterface.Views
         /// <summary>
         /// Get markdown 'tags' for a given style.
         /// </summary>
+        /// <param name="textView">The textview whose tag table should be searched.</param>
         /// <param name="styleName">The name of the style.</param>
         /// <param name="indent">The indent level.</param>
         /// <param name="url">The link url.</param>
         /// <returns></returns>
-        private TextTag[] GetTags(string styleName, int indent, string url = null)
+        private TextTag[] GetTags(TextView textView, string styleName, int indent, string url = null)
         {
             var tags = new List<TextTag>();
             if (!string.IsNullOrEmpty(styleName))
@@ -588,6 +702,11 @@ namespace UserInterface.Views
             var strikethrough = new TextTag("Strikethrough");
             strikethrough.Strikethrough = true;
             textView.Buffer.TagTable.Add(strikethrough);
+
+            // Give Gtk time to digest these additions to the tag table
+            // Otherwise we can sometimes get nulls when we access the tags
+            while (GLib.MainContext.Iteration())
+                ;
         }
 
         // Looks at all tags covering the position (x, y) in the text view,
@@ -596,28 +715,24 @@ namespace UserInterface.Views
         private void SetCursorIfAppropriate(TextView textView, int x, int y)
         {
             TextIter iter = textView.GetIterAtLocation(x, y);
-            // fixme: When we remove gtk2 deps, we can eliminate this check
-            if (iter.Equals(TextIter.Zero))
-                return;
-
             var foundLink = false;
-            foreach (TextTag tag in iter.Tags)
+            // fixme: When we remove gtk2 deps, we can eliminate this check
+            if (!iter.Equals(TextIter.Zero))
             {
-                if (tag is LinkTag)
-                    foundLink = true;
+                foreach (TextTag tag in iter.Tags)
+                {
+                    if (tag is LinkTag)
+                        foundLink = true;
+                }
             }
 
-            Gdk.Window window = textView.GetWindow(Gtk.TextWindowType.Text);
+            Gdk.Window window = textView.GetWindow(TextWindowType.Text);
             if (window != null)
             {
-                if (foundLink/*hovering != hoveringOverLink*/)
+                if (foundLink)
                     window.Cursor = handCursor;
                 else
                     window.Cursor = regularCursor;
-            }
-            else
-            {
-
             }
         }
 
@@ -700,7 +815,9 @@ namespace UserInterface.Views
         {
             try
             {
-                textView.GetPointer(out int wx, out int wy);
+
+                Gdk.Display.Default.GetPointer(out _, out int wx, out int wy, out _);
+
                 textView.WindowToBufferCoords(TextWindowType.Widget, wx, wy,
                                               out int bx, out int by);
                 SetCursorIfAppropriate(textView, bx, by);
@@ -718,11 +835,19 @@ namespace UserInterface.Views
         {
             try
             {
-                textView.KeyPressEvent -= OnTextViewKeyPress;
+                popupMenu.Clear();
+                popupMenu.Dispose();
+                accelerators.Dispose();
+                findView.Destroy();
+                textView.PopulatePopup -= OnPopulatePopupMenu;
                 textView.VisibilityNotifyEvent -= OnVisibilityNotify;
                 textView.MotionNotifyEvent -= OnMotionNotify;
                 textView.WidgetEventAfter -= OnWidgetEventAfter;
                 mainWidget.Destroyed -= OnDestroyed;
+                mainWidget.Realized -= OnRealized;
+                textView.FocusInEvent -= OnGainFocus;
+                textView.FocusOutEvent -= OnLoseFocus;
+                textView.KeyPressEvent -= OnTextViewKeyPress;
                 owner = null;
             }
             catch (Exception err)
@@ -738,13 +863,24 @@ namespace UserInterface.Views
             public LinkTag(string url) : base(url)
             {
                 URL = url;
-#if NETFRAMEWORK
-                ForegroundGdk = (ViewBase.MasterView as ViewBase).MainWidget.GetBackgroundColour(StateType.Selected);
-#else
-                ForegroundGdk = (ViewBase.MasterView as ViewBase).MainWidget.StyleContext.GetColor(StateType.Link).ToGdkColor();
-#endif
+
+                ForegroundGdk = (ViewBase.MasterView as ViewBase).MainWidget.StyleContext.GetColor(StateFlags.Link).ToColour().ToGdk();
+
                 Underline = Pango.Underline.Single;
             }
         }
+    }
+
+    /// <summary>An interface for a rich text widget.</summary>
+    public interface IMarkdownView
+    {
+        /// <summary>Gets or sets the base path that images should be relative to.</summary>
+        string ImagePath { get; set; }
+
+        /// <summary>Gets or sets the markdown text</summary>
+        string Text { get; set; }
+
+        /// <summary>Gets or sets the visibility of the widget.</summary>
+        bool Visible { get; set; }
     }
 }

@@ -1,60 +1,32 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
 using Models.CLEM.Resources;
+using Models.CLEM.Interfaces;
 
 namespace Models.CLEM.Activities
 {
     /// <summary>
     /// Blank activity for passing details
     /// </summary>
-    public class BlankActivity : CLEMActivityBase
+    public class BlankActivity : CLEMActivityBase, IHandlesActivityCompanionModels
     {
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
+        /// <inheritdoc/>
+        protected override void AdjustResourcesForTimestep()
         {
             return;
         }
 
-        /// <summary>
-        /// Constructor
-        /// </summary>
-        public override void DoActivity()
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
             throw new NotImplementedException();
         }
 
-        /// <summary>
-        /// Determines how much labour is required from this activity based on the requirement provided
-        /// </summary>
-        /// <param name="requirement">The details of how labour are to be provided</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
             throw new NotImplementedException();
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
-            throw new NotImplementedException();
-        }
     }
 }

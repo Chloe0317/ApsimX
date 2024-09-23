@@ -1,12 +1,14 @@
-﻿namespace Models.Factorial
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Core.Run;
+using static Models.Core.Overrides;
+
+namespace Models.Factorial
 {
-    using APSIM.Shared.Utilities;
-    using Models.Core;
-    using Models.Core.Run;
-    using System;
-    using System.Collections.Generic;
-    using System.IO;
-    using System.Linq;
 
     /// <summary>
     /// This class represents a series of paths and the same number of object values.
@@ -46,14 +48,6 @@
                 Name = value.ToString();
         }
 
-        /// <summary>Constructor</summary>
-        public CompositeFactor(Factor parentFactor, List<string> paths, List<object> values)
-        {
-            Parent = parentFactor;
-            Paths = paths;
-            Values = values;
-        }
-
         /// <summary>Gets or sets the specification to create overides for a simulation.</summary>
         public List<string> Specifications { get; set; }
 
@@ -76,12 +70,7 @@
 
             // Add a simulation override for each path / value combination.
             for (int i = 0; i != allPaths.Count; i++)
-            {
-                if (allValues[i] is IModel)
-                    simulationDescription.AddOverride(new ModelReplacement(allPaths[i], allValues[i] as IModel));
-                else
-                    simulationDescription.AddOverride(new PropertyReplacement(allPaths[i], allValues[i]));
-            }
+                simulationDescription.AddOverride(new Override(allPaths[i], allValues[i], Override.MatchTypeEnum.NameAndType));
 
             if (!(Parent is Factors))
             {
@@ -121,6 +110,13 @@
                 paths.AddRange(Paths);
                 values.AddRange(Values);
             }
+
+            // If there are any child models which aren't being used as
+            // a factor value (e.g. as a model replacement), throw an exception.
+            IEnumerable<IModel> extraModels = Children.Except(values.OfType<IModel>());
+            foreach (var model in extraModels)
+                if (model.Enabled && !(model is Memo))
+                    throw new InvalidOperationException($"Error in composite factor {Name}: Unused child models found: {string.Join(", ", extraModels.Select(m => m.Name))}");
         }
 
         /// <summary>
@@ -139,8 +135,8 @@
             if (path.Contains("="))
             {
                 value = StringUtilities.SplitOffAfterDelimiter(ref path, "=").Trim();
-                if (value == null)
-                    throw new Exception("Cannot find any values on the specification line: " + specification);
+                if (value == null || value as string == "")
+                    throw new Exception($"Error in composite factor {Name}: Unable to parse factor specification {specification}: No value was provided");
 
                 allPaths.Add(path.Trim());
                 allValues.Add(value.ToString().Trim());
@@ -159,8 +155,10 @@
                 IEnumerable<IModel> possibleMatches = FindAllChildren().Where(c => modelToReplace.GetType().IsAssignableFrom(c.GetType()));
                 if (possibleMatches.Count() > 1)
                     value = possibleMatches.FirstOrDefault(m => m.Name == modelToReplace.Name);
-                else
+                else if (possibleMatches.Count() == 1)
                     value = possibleMatches.First();
+                else
+                    throw new NullReferenceException($"Error in composite factor {Name}: Unable to parse factor specification {specification}: No children are of type {modelToReplace.GetType().Name}, so model {modelToReplace.Name} cannot be overriden.");
 
                 allPaths.Add(path.Trim());
                 allValues.Add(value);

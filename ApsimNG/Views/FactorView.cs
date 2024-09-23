@@ -1,15 +1,8 @@
-﻿namespace UserInterface.Views
+﻿using Gtk;
+using System;
+
+namespace UserInterface.Views
 {
-    using global::UserInterface.Extensions;
-    using Gtk;
-    using System;
-
-    public interface IFactorView
-    {
-        /// <summary>Gets or sets the specification.</summary>
-        IEditView Specification { get; set; }
-    }
-
 
     public class FactorView : ViewBase, IFactorView
     {
@@ -18,7 +11,7 @@
         public FactorView(ViewBase owner) : base(owner)
         {
             Builder builder = BuilderFromResource("ApsimNG.Resources.Glade.FactorView.glade");
-            mainWidget = (VBox)builder.GetObject("vbox");
+            mainWidget = (Widget)builder.GetObject("scrolledwindow1");
             mainWidget.Destroyed += OnMainWidgetDestroyed;
 
             Specification = new EditView(owner, 
@@ -35,7 +28,7 @@
         {
             try
             {
-                (Specification as EditView).MainWidget.Cleanup();
+                (Specification as EditView).Dispose();
 
                 mainWidget.Destroyed -= OnMainWidgetDestroyed;
                 owner = null;
@@ -45,5 +38,11 @@
                 ShowError(err);
             }
         }
+    }
+
+    public interface IFactorView
+    {
+        /// <summary>Gets or sets the specification.</summary>
+        IEditView Specification { get; set; }
     }
 }

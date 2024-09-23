@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Reflection;
+using System.Linq;
 using Models.Core;
 using Models.PMF.Phen;
-using System.Linq;
 
 namespace Models.Functions
 {
@@ -13,14 +11,14 @@ namespace Models.Functions
     /// </summary>
     [Serializable]
     [Description("Adds the value of all children functions to the previous day's accumulation between start and end phases")]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
-    public class AccumulateByNumericPhase : Model, IFunction 
+    public class AccumulateByNumericPhase : Model, IFunction
     {
         //Class members
         /// <summary>The accumulated value</summary>
         private double AccumulatedValue = 0;
-        
+
         /// <summary>The child functions</summary>
         private IEnumerable<IFunction> ChildFunctions;
 

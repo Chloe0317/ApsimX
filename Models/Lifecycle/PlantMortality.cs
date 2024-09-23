@@ -1,18 +1,16 @@
 ﻿using System;
 using Models.Core;
 using Models.Functions;
-using Models.LifeCycle;
-using Models.PMF;
 using Models.PMF.Interfaces;
+
 namespace Models.LifeCycle
 {
     /// <summary>
-    /// # [Name]
     /// Specifies the killing of plants by Pest/Disease.  The biomass and dimensions of organs will be reduced
     /// in Proportion to the number of plants killed.
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(LifeCyclePhase))]
     public class PlantMortality : Model

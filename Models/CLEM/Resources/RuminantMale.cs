@@ -1,58 +1,74 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace Models.CLEM.Resources
 {
     /// <summary>
     /// Object for an individual male Ruminant.
     /// </summary>
-    public class RuminantMale: Ruminant
+    [Serializable]
+    public class RuminantMale : Ruminant
     {
         /// <summary>
-        /// Indicates if individual is breeding sire
+        /// Sex of individual
         /// </summary>
-        public bool Sire { get; set; }
+        public override Sex Sex { get { return Sex.Male; } }
 
         /// <summary>
         /// Indicates if individual is breeding sire
+        /// Represents any uncastrated male of breeding age
         /// </summary>
-        public bool IsSire 
+        [FilterByProperty]
+        public bool IsSire
         {
             get
             {
-                if(ReplacementBreeder)
-                {
-                    if(Age >= BreedParams.MinimumAge1stMating)
+                if (Attributes.Exists("Sire") & !Attributes.Exists("Castrated"))
+                    if (Age >= BreedParams.MinimumAge1stMating)
                     {
-                        Sire = true;
                         ReplacementBreeder = false;
+                        return true;
                     }
-                }
-                return Sire;
+                return false;
             }
         }
 
         /// <summary>
-        /// Indicates if individual is castrated
+        /// Indicates if individual is breeding sire
+        /// Represents any uncastrated male of breeding age that is assigned sire and therefroe may have improved genetics/price
         /// </summary>
-        public bool IsCastrated { get; set; }
+        [FilterByProperty]
+        public bool IsWildBreeder
+        {
+            get
+            {
+                if (!Attributes.Exists("Sire") & !Attributes.Exists("Castrated"))
+                    if (Age >= BreedParams.MinimumAge1stMating)
+                        return true;
+                return false;
+            }
+        }
 
+        /// <inheritdoc/>
+        [FilterByProperty]
+        public override bool IsSterilised { get { return IsCastrated; } }
 
         /// <summary>
-        /// Indicates if individual is draught animal
+        /// Indicates if individual is castrated
         /// </summary>
-        public bool IsDraught { get; set; }
+        [FilterByProperty]
+        public bool IsCastrated { get { return Attributes.Exists("Castrated"); }}
+
+        /// <summary>
+        /// Is this individual a valid breeder and in condition
+        /// </summary>
+        public override bool IsAbleToBreed {  get { return this.IsSire | this.IsWildBreeder; } }
 
         /// <summary>
         /// Constructor
         /// </summary>
-        public RuminantMale(double setAge, Sex setGender, double setWeight, RuminantType setParams): base(setAge, setGender, setWeight, setParams)
+        public RuminantMale(RuminantType setParams, double setAge, double setWeight)
+            : base(setParams, setAge, setWeight)
         {
-            Sire = false;
-            IsDraught = false;
-            IsCastrated = false;
         }
 
     }

@@ -1,84 +1,35 @@
 ﻿using Models.Core;
 using Models.CLEM.Resources;
+using Models.CLEM.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using Newtonsoft.Json;
-using Models.CLEM;
 using Models.CLEM.Groupings;
-using System.ComponentModel.DataAnnotations;
 using Models.Core.Attributes;
-using System.IO;
+using APSIM.Shared.Utilities;
 
 namespace Models.CLEM.Activities
 {
     /// <summary>Ruminant herd cost </summary>
     /// <summary>This activity will arrange payment of a herd expense such as vet fees</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CLEMActivityBase))]
     [ValidParent(ParentType = typeof(ActivitiesHolder))]
     [ValidParent(ParentType = typeof(ActivityFolder))]
-    [Description("This activity will arange payment of a ruminant herd expense such as dips and drenches based on the current herd filtering.")]
+    [Description("Arrange payment of a ruminant herd expense with specified style")]
+    [Version(1, 1, 0, "Implements event based activity control")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Ruminant/RuminantHerdCost.htm")]
-    public class RuminantActivityHerdCost : CLEMRuminantActivityBase, IValidatableObject
+    public class RuminantActivityHerdCost : CLEMRuminantActivityBase, IHandlesActivityCompanionModels
     {
-        /// <summary>
-        /// Amount payable
-        /// </summary>
-        [Description("Amount payable")]
-        [Required, GreaterThanValue(0)]
-        public double Amount { get; set; }
-
-        /// <summary>
-        /// Payment style
-        /// </summary>
-        [System.ComponentModel.DefaultValueAttribute(AnimalPaymentStyleType.perHead)]
-        [Description("Payment style")]
-        [Required]
-        public AnimalPaymentStyleType PaymentStyle { get; set; }
-
-        /// <summary>
-        /// Bank account to use
-        /// </summary>
-        [Description("Bank account to use")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMResourceGroups = new Type[] { typeof(Finance) })]
-        [Required(AllowEmptyStrings = false, ErrorMessage = "Bank account required")]
-        public string AccountName { get; set; }
-
-        /// <summary>
-        /// Category label to use in ledger
-        /// </summary>
-        [Description("Shortname of fee for reporting")]
-        [Required(AllowEmptyStrings = false, ErrorMessage = "Shortname required")]
-        public string Category { get; set; }
-
-        #region validation
-        /// <summary>
-        /// Validate object
-        /// </summary>
-        /// <param name="validationContext"></param>
-        /// <returns></returns>
-        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
-        {
-            var results = new List<ValidationResult>();
-            switch (PaymentStyle)
-            {
-                case AnimalPaymentStyleType.Fixed:
-                case AnimalPaymentStyleType.perHead:
-                case AnimalPaymentStyleType.perAE:
-                    break;
-                default:
-                    string[] memberNames = new string[] { "PaymentStyle" };
-                    results.Add(new ValidationResult("Payment style " + PaymentStyle.ToString() + " is not supported", memberNames));
-                    break;
-            }
-            return results;
-        } 
-        #endregion
+        private int numberToDo;
+        private int numberToSkip;
+        private double amountToDo;
+        private double amountToSkip;
+        private IEnumerable<Ruminant> uniqueIndividuals;
+        private IEnumerable<RuminantGroup> filterGroups;
 
         /// <summary>
         /// Constructor
@@ -95,193 +46,92 @@ namespace Models.CLEM.Activities
         private void OnCLEMInitialiseActivity(object sender, EventArgs e)
         {
             this.InitialiseHerd(true, true);
+            filterGroups = GetCompanionModelsByIdentifier<RuminantGroup>(false, true);
         }
 
-        /// <summary>
-        /// Method to determine resources required for this activity in the current month
-        /// </summary>
-        /// <returns>List of required resource requests</returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
         {
-            List<ResourceRequest> resourcesNeeded = null;
-
-            double amountNeeded = 0;
-            List<Ruminant> herd = this.CurrentHerd(false);
-            if (herd.Count() != 0)
+            switch (type)
             {
-                switch (PaymentStyle)
+                case "RuminantGroup":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>(),
+                        measures: new List<string>()
+                        );
+                case "ActivityFee":
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>() {
+                        },
+                        measures: new List<string>() {
+                            "fixed",
+                            "per head",
+                            "per AE"
+                        }
+                        );
+                default:
+                    return new LabelsForCompanionModels();
+            }
+        }
+
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
+        {
+            numberToDo = 0;
+            numberToSkip = 0;
+            IEnumerable<Ruminant> herd = GetIndividuals<Ruminant>(GetRuminantHerdSelectionStyle.NotMarkedForSale);
+            uniqueIndividuals = GetUniqueIndividuals<Ruminant>(filterGroups, herd);
+            numberToDo = uniqueIndividuals?.Count() ?? 0;
+
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
+            {
+                int number = numberToDo;
+                switch (valueToSupply.Key.unit)
                 {
-                    case AnimalPaymentStyleType.Fixed:
-                        amountNeeded = Amount;
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
                         break;
-                    case AnimalPaymentStyleType.perHead:
-                        amountNeeded = Amount * herd.Count();
+                    case "per head":
+                        valuesForCompanionModels[valueToSupply.Key] = number;
                         break;
-                    case AnimalPaymentStyleType.perAE:
-                        amountNeeded = Amount * herd.Sum(a => a.AdultEquivalent);
+                    case "per AE":
+                        amountToDo = uniqueIndividuals.Sum(a => a.AdultEquivalent);
+                        valuesForCompanionModels[valueToSupply.Key] = amountToDo;
                         break;
                     default:
-                        break;
+                        throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
                 }
             }
-
-            if (amountNeeded > 0)
-            {
-                // determine breed
-                // this is too much overhead for a simple reason field, especially given large herds.
-                //List<string> res = herd.Select(a => a.Breed).Distinct().ToList();
-                //string breedName = (res.Count() > 1) ? "Multiple breeds" : res.First();
-                string breedName = "Herd cost";
-
-                resourcesNeeded = new List<ResourceRequest>()
-                {
-                    new ResourceRequest()
-                    {
-                        AllowTransmutation = false,
-                        Required = amountNeeded,
-                        ResourceType = typeof(Finance),
-                        ResourceTypeName = this.AccountName.Split('.').Last(),
-                        ActivityModel = this,
-                        RelatesToResource = breedName,
-                        Category = Category
-                    }
-                };
-            }
-            return resourcesNeeded;
-        }
-
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
-        {
-            return;
-        }
-
-        /// <summary>
-        /// Determine the labour required for this activity based on LabourRequired items in tree
-        /// </summary>
-        /// <param name="requirement">Labour requirement model</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
-        {
-            // get all potential dry breeders
-            List<Ruminant> herd = this.CurrentHerd(false);
-            int head = herd.Count();
-            double animalEquivalents = herd.Sum(a => a.AdultEquivalent);
-            double daysNeeded = 0;
-            double numberUnits = 0;
-            switch (requirement.UnitType)
-            {
-                case LabourUnitType.Fixed:
-                    daysNeeded = requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perHead:
-                    numberUnits = head / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perAE:
-                    numberUnits = animalEquivalents / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                default:
-                    throw new Exception(String.Format("LabourUnitType {0} is not supported for {1} in {2}", requirement.UnitType, requirement.Name, this.Name));
-            }
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, this.Category, this.PredictedHerdName);
-        }
-
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            return;
-        }
-
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
             return null;
         }
 
-        /// <summary>
-        /// Resource shortfall event handler
-        /// </summary>
-        public override event EventHandler ResourceShortfallOccurred;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnShortfallOccurred(EventArgs e)
+        /// <inheritdoc/>
+        protected override void AdjustResourcesForTimestep()
         {
-            ResourceShortfallOccurred?.Invoke(this, e);
-        }
-
-        /// <summary>
-        /// Resource shortfall occured event handler
-        /// </summary>
-        public override event EventHandler ActivityPerformed;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnActivityPerformed(EventArgs e)
-        {
-            ActivityPerformed?.Invoke(this, e);
-        }
-
-        #region descriptive summary
-
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
-        {
-            using (StringWriter htmlWriter = new StringWriter())
+            IEnumerable<ResourceRequest> shortfalls = MinimumShortfallProportion();
+            if (shortfalls.Any())
             {
-                htmlWriter.Write("\r\n<div class=\"activityentry\">Pay ");
-                htmlWriter.Write("<span class=\"setvalue\">" + Amount.ToString("#,##0.00") + "</span> ");
-                htmlWriter.Write("<span class=\"setvalue\">" + PaymentStyle.ToString() + "</span> from ");
-                if (AccountName == null || AccountName == "")
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[ACCOUNT NOT SET]</span>");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"resourcelink\">" + AccountName + "</span>");
-                }
-                htmlWriter.Write("</div>");
-                htmlWriter.Write("\r\n<div class=\"activityentry\">This activity uses a category label ");
-                if (Category != null && Category != "")
-                {
-                    htmlWriter.Write("<span class=\"setvalue\">" + Category + "</span> ");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[NOT SET]</span> ");
-                }
-                htmlWriter.Write(" for all transactions</div>");
-                return htmlWriter.ToString(); 
+                // find shortfall by identifiers as these may have different influence on outcome
+                var shorts = shortfalls.Where(a => a.CompanionModelDetails.unit == "per head").FirstOrDefault();
+                if (shorts != null)
+                    numberToSkip = Convert.ToInt32(numberToDo * (1 - shorts.Available / shorts.Required));
+
+                var amountShort = shortfalls.Where(a => a.CompanionModelDetails.unit == "per AE").FirstOrDefault();
+                if (amountShort != null)
+                    amountToSkip = Convert.ToInt32(amountToDo * (1 - amountShort.Available / amountShort.Required));
             }
-        } 
-        #endregion
+        }
+
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
+        {
+            if (numberToDo - numberToSkip > 0)
+            {
+                SetStatusSuccessOrPartial(MathUtilities.IsPositive(numberToSkip + amountToSkip));
+            }
+        }
 
     }
 }

@@ -1,9 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
+using System;
 
 namespace Models.CLEM.Resources
 {
@@ -47,9 +43,7 @@ namespace Models.CLEM.Resources
         public void Add(HumanFoodStorePool pool)
         {
             if (pool.Amount > 0)
-            {
                 amount += pool.Amount;
-            }
         }
 
         /// <summary>
@@ -60,9 +54,7 @@ namespace Models.CLEM.Resources
         public void Add(double amount)
         {
             if (amount > 0)
-            {
                 this.amount += amount;
-            }
         }
 
         /// <summary>
@@ -76,7 +68,7 @@ namespace Models.CLEM.Resources
             removeAmount = Math.Min(this.amount, removeAmount);
             this.amount -= removeAmount;
             return removeAmount;
-        } 
+        }
         #endregion
     }
 }

@@ -1,38 +1,36 @@
-﻿namespace Models
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using Models.Core;
+
+namespace Models
 {
-    using APSIM.Shared.Utilities;
-    using Functions;
-    using Models.Core;
-    using Models.Storage;
-    using System;
-    using System.Collections.Generic;
-    using System.Diagnostics.CodeAnalysis;
-    using System.Linq;
-    using System.Text.RegularExpressions;
 
     /// <summary>
-    /// A class for looking after a column of output. A column will store a value 
+    /// A class for looking after a column of output. A column will store a value
     /// each time it is told to do so (by calling StoreValue method). This value
     /// can be a scalar, an array of scalars, a structure, or an array of structures.
-    /// It can handle array sizes changing through a simulation. 
+    /// It can handle array sizes changing through a simulation.
     /// It "flattens" arrays and structures
     /// e.g. if the variable is sw_dep and has 3 elements then
     ///      Names -> sw_dep(1), sw_dep(2), sw_dep(3)
     ///      Types ->    double,    double,    double
     /// e.g. if the variable is a struct {double A; double B; double C;}
     ///      Names -> struct.A, struct.B, struct.C
-    ///      
+    ///
     /// # Features
-    /// - 
-    /// 
+    /// -
+    ///
     /// ## Aggregation
-    /// 
+    ///
     /// Syntax:
-    /// 
+    ///
     /// *function* of *variable* from *date* to *date*
-    /// 
+    ///
     /// *function* can be any of the following:
-    /// 
+    ///
     /// - sum
     /// - mean
     /// - min
@@ -40,35 +38,35 @@
     /// - first
     /// - last
     /// - diff
-    /// 
+    ///
     /// *variable* is any valid reporting variable.
-    /// 
+    ///
     /// There are three ways to specify aggregation dates:
-    /// 
+    ///
     /// 1. Fixed/static date
-    /// 
+    ///
     /// Description
-    /// 
+    ///
     /// e.g. 1-Jan, 1/1/2012, etc.
-    /// 
+    ///
     /// 2. Apsim variable
-    /// 
+    ///
     /// The date can point to any Apsim variable which is of type DateTime.
-    /// 
+    ///
     /// e.g. [Clock].StartDate, [Clock].Today, [Report].LastReportDate, etc.
-    /// 
+    ///
     /// 3. Apsim event
-    /// 
+    ///
     /// The date can point to any Apsim event.
-    /// 
+    ///
     /// e.g. [Clock].StartOfYear, [Wheat].Harvesting, etc.
-    /// 
+    ///
     /// </summary>
     /// <remarks>
     /// Need tests for:
-    /// 
+    ///
     /// 1. All permutations of date specification types with all types of aggregation.
-    /// 
+    ///
     /// </remarks>
     [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1650:ElementDocumentationMustBeSpelledCorrectly", Justification = "Reviewed.")]
     [Serializable]
@@ -112,6 +110,7 @@
 
         /// <summary>Variable containing a reference to the aggregation end date.</summary>
         private IVariable toVariable = null;
+        private string collectionEventName;
 
         /// <summary>The variable groups containing the variable values.</summary>
         private readonly List<VariableGroup> groups = new List<VariableGroup>();
@@ -137,7 +136,7 @@
             this.events = events;
             if (!string.IsNullOrEmpty(groupByVariableName))
                 this.groupByName = groupByVariableName;
-            
+
             var match = ParseReportLine(reportLine);
 
             var fromString = match.Groups["from"].Value;
@@ -178,9 +177,17 @@
             if (groupNumber >= groups.Count)
                 groups.Add(new VariableGroup(locator, null, variableName, aggregationFunction));
 
+            if (possibleRecursion)
+            {
+                IVariable var = locator.GetObjectProperties(variableName, LocatorFlags.IncludeReportVars | LocatorFlags.ThrowOnError);
+                if (var == null)
+                    return null;
+                else
+                    possibleRecursion = false;
+            }
             if (string.IsNullOrEmpty(aggregationFunction) && string.IsNullOrEmpty(groupByName))
             {
-                // This instance is NOT a temporarily aggregated variable and so hasn't 
+                // This instance is NOT a temporarily aggregated variable and so hasn't
                 // collected a value yet. Do it now.
                 groups[groupNumber].StoreValue();
             }
@@ -213,6 +220,11 @@
         }
 
         /// <summary>
+        /// Test
+        /// </summary>
+        public bool possibleRecursion { get; private set; } = false;
+
+        /// <summary>
         /// Parse a report variable line.
         /// </summary>
         /// <remarks>
@@ -221,7 +233,7 @@
         /// Evaluate TypeOfAggregation of APSIMVariable/Expression [from Event/Date to Event/Date] as OutputLabel [Units]
         /// -    TypeOfAggregation – Sum, Mean, Min, Max, First, Last, Diff, (others?) (see below)
         /// -    APSIMVariable/Expression – APSIM output variable or an expression (see below)
-        /// -    Event/Date – optional, an events or dates to begin and end the aggregation 
+        /// -    Event/Date – optional, an events or dates to begin and end the aggregation
         /// -    OutputLabel – the label to use in the output file
         /// -    Units – optional, the label to use in the output file
         /// TypeOfAggregation
@@ -288,7 +300,7 @@
             if (string.IsNullOrEmpty(Name))
             {
                 // Look for an array specification. The aim is to encode the starting
-                // index of the array into the column name. e.g. 
+                // index of the array into the column name. e.g.
                 // for a variableName of [2:4], columnName = [2]
                 // for a variableName of [3:], columnName = [3]
                 // for a variableName of [:5], columnNamne = [0]
@@ -304,13 +316,15 @@
             // Try and get units.
             try
             {
-                IVariable var = locator.GetObject(variableName);
+                IVariable var = locator.GetObjectProperties(variableName, LocatorFlags.IncludeReportVars);
                 if (var != null)
                 {
                     Units = var.UnitsLabel;
                     if (Units != null && Units.StartsWith("(") && Units.EndsWith(")"))
                         Units = Units.Substring(1, Units.Length - 2);
                 }
+                else
+                    possibleRecursion = true;
             }
             catch (Exception)
             {
@@ -322,21 +336,22 @@
             {
                 // temporarly aggregated variable
                 // subscribe to the capture event
-                var collectionEventName = "[Clock].DoReportCalculations";
+                collectionEventName = "[Clock].DoReportCalculations";
                 if (!string.IsNullOrEmpty(on))
                     collectionEventName = on;
                 events.Subscribe(collectionEventName, OnDoReportCalculations);
 
                 // subscribe to the start of day event so that we can determine if we're in the capture window.
                 events.Subscribe("[Clock].DoDailyInitialisation", OnStartOfDay);
-
+                events.Subscribe("[Simulation].UnsubscribeFromEvents", OnUnsubscribeFromEvents);
                 fromVariable = (clock as IModel).FindByPath(fromString);
                 toVariable = (clock as IModel).FindByPath(toString);
                 if (fromVariable != null)
                 {
                     // A from variable name  was specified.
                 }
-                else if (DateTime.TryParse(fromString, out DateTime date))
+                else if (DateTime.TryParseExact(fromString, "d-MMM", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date)
+                      || DateTime.TryParse(fromString, out date))
                 {
                     // The from date is a static, hardcoded date string. ie 1-Jan, 1/1/2012, etc.
                     fromVariable = new VariableObject(date);
@@ -355,7 +370,8 @@
                 {
                     // A to variable name  was specified.
                 }
-                else if (DateTime.TryParse(toString, out DateTime date))
+                else if (DateTime.TryParseExact(toString, "d-MMM", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date)
+                      || DateTime.TryParse(toString, out date))
                 {
                     // The from date is a static, hardcoded date string. ie 1-Jan, 1/1/2012, etc.
                     toVariable = new VariableObject(date);
@@ -369,6 +385,23 @@
                     events.Subscribe(toString, OnToEvent);
                 }
             }
+        }
+
+        /// <summary>
+        /// Disconnect event handlers when the simulation finishes.
+        /// </summary>
+        /// <param name="sender">Sender object.</param>
+        /// <param name="e">Event data.</param>
+        private void OnUnsubscribeFromEvents(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(collectionEventName))
+                events.Unsubscribe(collectionEventName, OnDoReportCalculations);
+            if (!string.IsNullOrEmpty(toString) && toVariable == null)
+                events.Unsubscribe(toString, OnToEvent);
+            if (!string.IsNullOrEmpty(fromString) && fromVariable == null)
+                events.Unsubscribe(fromString, OnFromEvent);
+            events.Unsubscribe("[Clock].DoDailyInitialisation", OnStartOfDay);
+            events.Unsubscribe("[Simulation].UnsubscribeFromEvents", OnUnsubscribeFromEvents);
         }
 
         /// <summary>

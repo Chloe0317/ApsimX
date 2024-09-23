@@ -3,16 +3,12 @@ using APSIM.Shared.Utilities;
 using Models.Core;
 using Models.Functions;
 using System;
-using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using UserInterface.Views;
-using UserInterface.Interfaces;
-using Utility;
+using Models.PMF.Phen;
 
 namespace UserInterface.Presenters
 {
@@ -36,30 +32,35 @@ namespace UserInterface.Presenters
             PopulateView();
         }
 
-        private void PopulateView()
+        private async void PopulateView()
         {
-            view.Text = DocumentModel(model).Replace("<", @"\<");
+            view.Text = await Task.Run(() => DocumentModel(model).Replace("<", @"\<"));
         }
 
         private string DocumentModel(IModel model)
         {
             StringBuilder markdown = new StringBuilder();
 
+            string summary = AutoDocumentation.GetSummary(model.GetType());
             markdown.AppendLine($"# {model.Name} Description");
             markdown.AppendLine();
-            markdown.AppendLine("## General Description");
-            markdown.AppendLine();
-            string summary = AutoDocumentation.GetSummary(model.GetType())?.Replace("            ", "");
-            
             markdown.AppendLine(summary);
             markdown.AppendLine();
 
             string remarks = AutoDocumentation.GetRemarks(model.GetType());
             if (!string.IsNullOrEmpty(remarks))
             {
-                markdown.AppendLine("## Remarks");
+                markdown.AppendLine($"# Remarks");
                 markdown.AppendLine();
                 markdown.AppendLine(remarks);
+                markdown.AppendLine();
+            }
+
+            //This has been added so Phenology can show its phases inside of the GUI
+            if (model.GetType() == typeof(Phenology))
+            {
+                DataTable dataTable = (model as Phenology).GetPhaseTable();
+                markdown.AppendLine(DataTableUtilities.ToMarkdown(dataTable, true));
                 markdown.AppendLine();
             }
 
@@ -119,7 +120,7 @@ namespace UserInterface.Presenters
 
                 if (outputs.Rows.Count > 0)
                 {
-                    markdown.AppendLine("## Model Outputs");
+                    markdown.AppendLine("## Outputs");
                     markdown.AppendLine();
                     markdown.AppendLine(DataTableUtilities.ToMarkdown(outputs, true));
                     markdown.AppendLine();
@@ -140,7 +141,7 @@ namespace UserInterface.Presenters
             BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy;
             foreach (EventInfo evnt in model.GetType().GetEvents(flags))
             {
-                if (!evnt.IsSpecialName && !evnt.DeclaringType.IsAssignableFrom(typeof(ModelCollectionFromResource)))
+                if (!evnt.IsSpecialName)
                 {
                     DataRow row = table.NewRow();
 
@@ -168,8 +169,7 @@ namespace UserInterface.Presenters
             BindingFlags flags = BindingFlags.Instance | BindingFlags.Public;
             foreach (PropertyInfo property in model.GetType().GetProperties(flags))
             {
-                if (property.GetCustomAttribute<DescriptionAttribute>() == null &&
-                    !property.DeclaringType.IsAssignableFrom(typeof(ModelCollectionFromResource)))
+                if (property.GetCustomAttribute<DescriptionAttribute>() == null)
                 {
                     DataRow row = table.NewRow();
 
@@ -197,7 +197,7 @@ namespace UserInterface.Presenters
             BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy;
             foreach (MethodInfo method in model.GetType().GetMethods(flags))
             {
-                if (!method.IsSpecialName && !method.DeclaringType.IsAssignableFrom(typeof(ModelCollectionFromResource)))
+                if (!method.IsSpecialName)
                 {
                     DataRow row = table.NewRow();
 

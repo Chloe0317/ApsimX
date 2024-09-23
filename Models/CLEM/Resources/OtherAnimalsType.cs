@@ -1,12 +1,11 @@
-﻿using Models.Core;
+﻿using Models.CLEM.Interfaces;
+using Models.Core;
 using Models.Core.Attributes;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
 
 namespace Models.CLEM.Resources
 {
@@ -14,10 +13,10 @@ namespace Models.CLEM.Resources
     /// Store for bank account
     ///</summary> 
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(OtherAnimals))]
-    [Description("This resource represents an other animal group (e.g. Chickens).")]
+    [Description("This resource represents an other animal type (e.g. chickens)")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Resources/Other animals/OtherAnimalType.htm")]
     public class OtherAnimalsType : CLEMResourceTypeBase, IResourceWithTransactionType, IResourceType
@@ -56,9 +55,7 @@ namespace Models.CLEM.Resources
         private void OnSimulationCompleted(object sender, EventArgs e)
         {
             if (Cohorts != null)
-            {
                 Cohorts.Clear();
-            }
             Cohorts = null;
         }
 
@@ -87,40 +84,30 @@ namespace Models.CLEM.Resources
                 if (child is OtherAnimalsTypeCohort)
                 {
                     ((OtherAnimalsTypeCohort)child).SaleFlag = HerdChangeReason.InitialHerd;
-                    Add(child, this, "", "Setup");
+                    Add(child, null, null, "Initial numbers");
                 }
             }
         }
 
-        #region Transactions
-
         /// <summary>
-        /// Last transaction received
+        /// Total value of resource
         /// </summary>
-        [JsonIgnore]
-        public ResourceTransaction LastTransaction { get; set; }
+        public double? Value
+        {
+            get
+            {
+                return Price(PurchaseOrSalePricingStyleType.Sale)?.CalculateValue(Amount);
+            }
+        }
+
+
+        #region Transactions
 
         /// <summary>
         /// Amount
         /// </summary>
+        [JsonIgnore]
         public double Amount { get; set; }
-
-        /// <summary>
-        /// Override base event
-        /// </summary>
-        protected void OnTransactionOccurred(EventArgs e)
-        {
-            EventHandler invoker = TransactionOccurred;
-            if (invoker != null)
-            {
-                invoker(this, e);
-            }
-        }
-
-        /// <summary>
-        /// Override base event
-        /// </summary>
-        public event EventHandler TransactionOccurred;
 
         /// <summary>
         /// Add individuals to type based on cohort
@@ -133,35 +120,17 @@ namespace Models.CLEM.Resources
         {
             OtherAnimalsTypeCohort cohortToAdd = addIndividuals as OtherAnimalsTypeCohort;
 
-            OtherAnimalsTypeCohort cohortexists = Cohorts.Where(a => a.Age == cohortToAdd.Age && a.Gender == cohortToAdd.Gender).FirstOrDefault();
+            OtherAnimalsTypeCohort cohortexists = Cohorts.Where(a => a.Age == cohortToAdd.Age && a.Sex == cohortToAdd.Sex).FirstOrDefault();
 
             if (cohortexists == null)
-            {
                 // add new
                 Cohorts.Add(cohortToAdd);
-            }
             else
-            {
                 cohortexists.Number += cohortToAdd.Number;
-            }
 
             LastCohortChanged = cohortToAdd;
-            ResourceTransaction details = new ResourceTransaction
-            {
-                Gain = cohortToAdd.Number,
-                Activity = activity,
-                RelatesToResource = relatesToResource,
-                Category = category,
-                ResourceType = this,
-                ExtraInformation = cohortToAdd
-            };
-            LastTransaction = details;
-            LastGain = cohortToAdd.Number;
-            TransactionEventArgs eargs = new TransactionEventArgs
-            {
-                Transaction = LastTransaction
-            };
-            OnTransactionOccurred(eargs);
+
+            ReportTransaction(TransactionType.Gain, cohortToAdd.Number, activity, relatesToResource, category, this, cohortToAdd);
         }
 
         /// <summary>
@@ -173,12 +142,12 @@ namespace Models.CLEM.Resources
         public void Remove(object removeIndividuals, CLEMModel activity, string reason)
         {
             OtherAnimalsTypeCohort cohortToRemove = removeIndividuals as OtherAnimalsTypeCohort;
-            OtherAnimalsTypeCohort cohortexists = Cohorts.Where(a => a.Age == cohortToRemove.Age && a.Gender == cohortToRemove.Gender).First();
+            OtherAnimalsTypeCohort cohortexists = Cohorts.Where(a => a.Age == cohortToRemove.Age && a.Sex == cohortToRemove.Sex).First();
 
             if (cohortexists == null)
             {
                 // tried to remove individuals that do not exist
-                throw new Exception("Tried to remove individuals from "+this.Name+" that do not exist");
+                throw new Exception("Tried to remove individuals from " + this.Name + " that do not exist");
             }
             else
             {
@@ -187,20 +156,7 @@ namespace Models.CLEM.Resources
             }
 
             LastCohortChanged = cohortToRemove;
-            ResourceTransaction details = new ResourceTransaction
-            {
-                Loss = cohortToRemove.Number,
-                Activity = activity,
-                Category = reason,
-                ResourceType = this,
-                ExtraInformation = cohortToRemove
-            };
-            LastTransaction = details;
-            TransactionEventArgs eargs = new TransactionEventArgs
-            {
-                Transaction = LastTransaction
-            };
-            OnTransactionOccurred(eargs);
+            ReportTransaction(TransactionType.Loss, cohortToRemove.Number, activity, "", reason, this, cohortToRemove);
         }
 
         /// <summary>

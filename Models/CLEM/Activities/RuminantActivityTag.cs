@@ -1,42 +1,35 @@
 ﻿using Models.CLEM.Groupings;
+using Models.CLEM.Interfaces;
 using Models.CLEM.Resources;
 using Models.Core;
 using Models.Core.Attributes;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Models.CLEM.Activities
 {
     /// <summary>Add or remove a tag to specified individual ruminants</summary>
     /// <version>1.0</version>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CLEMActivityBase))]
     [ValidParent(ParentType = typeof(ActivitiesHolder))]
     [ValidParent(ParentType = typeof(ActivityFolder))]
-    [Description("This activity adds or removes a specified tag to/from the specified individuals for customised filtering.")]
+    [Description("Add or remove a specified tag to/from the specified individuals for customised filtering")]
+    [Version(1, 1, 0, "Implements event based activity control")]
+    [Version(1, 0, 2, "Uses the Attribute feature of Ruminants")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Ruminant/RuminantTag.htm")]
 
-    public class RuminantActivityTag : CLEMRuminantActivityBase
+    public class RuminantActivityTag : CLEMRuminantActivityBase, IHandlesActivityCompanionModels
     {
-        private LabourRequirement labourRequirement;
-
-        /// <summary>An event handler to allow us to initialise ourselves.</summary>
-        /// <param name="sender">The sender.</param>
-        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
-        [EventSubscribe("CLEMInitialiseActivity")]
-        private void OnCLEMInitialiseActivity(object sender, EventArgs e)
-        {
-            // get all ui tree herd filters that relate to this activity
-            this.InitialiseHerd(true, true);
-        }
+        private int numberToDo;
+        private int numberToSkip;
+        private IEnumerable<Ruminant> uniqueIndividuals;
+        private IEnumerable<RuminantGroup> filterGroups;
 
         /// <summary>
         /// Tag label
@@ -52,203 +45,139 @@ namespace Models.CLEM.Activities
         [System.ComponentModel.DefaultValueAttribute(TagApplicationStyle.Add)]
         public TagApplicationStyle ApplicationStyle { get; set; }
 
-        private int filterGroupsCount = 0;
-        private int numberToTag = 0;
-
         /// <summary>
-        /// Method to determine resources required for this activity in the current month
+        /// constructor
         /// </summary>
-        /// <returns>List of required resource requests</returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        public RuminantActivityTag()
         {
-            return null;
+            // activity is performed in ManageAnimals
+            this.AllocationStyle = ResourceAllocationStyle.Manual;
         }
 
-        /// <summary>
-        /// Determines how much labour is required from this activity based on the requirement provided
-        /// </summary>
-        /// <param name="requirement">The details of how labour are to be provided</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
+        /// <summary>An event handler to allow us to initialise ourselves.</summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+        [EventSubscribe("CLEMInitialiseActivity")]
+        private void OnCLEMInitialiseActivity(object sender, EventArgs e)
         {
-            List<Ruminant> herd = CurrentHerd(false);
+            // get all ui tree herd filters that relate to this activity
+            this.InitialiseHerd(true, true);
+            filterGroups = GetCompanionModelsByIdentifier<RuminantGroup>(true, false);
+        }
 
-            filterGroupsCount = FindAllChildren<RuminantGroup>().Count();
-            if (filterGroupsCount > 0)
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
+        {
+            switch (type)
             {
-                numberToTag = 0;
-                foreach (RuminantGroup item in FindAllChildren<RuminantGroup>())
-                {
-                    if (ApplicationStyle == TagApplicationStyle.Add)
-                    {
-                        numberToTag += herd.Filter(item).Where(a => !a.TagExists(TagLabel)).Count();
-                    }
-                    else
-                    {
-                        numberToTag += herd.Filter(item).Where(a => a.TagExists(TagLabel)).Count();
-                    }
-                }
-            }
-            else
-            {
-                numberToTag = herd.Count();
-            }
-
-            double adultEquivalents = herd.Sum(a => a.AdultEquivalent);
-            double daysNeeded = 0;
-            double numberUnits = 0;
-            labourRequirement = requirement;
-            switch (requirement.UnitType)
-            {
-                case LabourUnitType.Fixed:
-                    daysNeeded = requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perHead:
-                    numberUnits = numberToTag / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
+                case "RuminantGroup":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>() ,
+                        measures: new List<string>()
+                        );
+                case "ActivityFee":
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>() {
+                        },
+                        measures: new List<string>() {
+                            "fixed",
+                            "per head"
+                        }
+                        );
                 default:
-                    throw new Exception(String.Format("LabourUnitType {0} is not supported for {1} in {2}", requirement.UnitType, requirement.Name, this.Name));
+                    return new LabelsForCompanionModels();
             }
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, "Mark", this.PredictedHerdName);
         }
 
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
+        /// <inheritdoc/>
+        [EventSubscribe("CLEMAnimalMark")]
+        protected override void OnGetResourcesPerformActivity(object sender, EventArgs e)
         {
-            if (LabourLimitProportion > 0 && LabourLimitProportion < 1 && (labourRequirement != null && labourRequirement.LabourShortfallAffectsActivity))
+            ManageActivityResourcesAndTasks();
+        }
+
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
+        {
+            numberToDo = 0;
+            numberToSkip = 0;
+            IEnumerable<Ruminant> herd = GetIndividuals<Ruminant>(GetRuminantHerdSelectionStyle.AllOnFarm).Where(a => a.Attributes.Exists(TagLabel) == (ApplicationStyle != TagApplicationStyle.Add));
+            uniqueIndividuals = GetUniqueIndividuals<Ruminant>(filterGroups, herd);
+            numberToDo = uniqueIndividuals?.Count() ?? 0;
+
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
             {
-                switch (labourRequirement.UnitType)
+                int number = numberToDo;
+                switch (valueToSupply.Key.unit)
                 {
-                    case LabourUnitType.Fixed:
-                    case LabourUnitType.perHead:
-                        numberToTag = Convert.ToInt32(numberToTag * LabourLimitProportion, CultureInfo.InvariantCulture);
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
+                        break;
+                    case "per head":
+                        valuesForCompanionModels[valueToSupply.Key] = number;
                         break;
                     default:
-                        throw new ApsimXException(this, "Labour requirement type " + labourRequirement.UnitType.ToString() + " is not supported in DoActivity method of [a=" + this.Name + "]");
-                }
-            }
-            return;
-        }
-
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
-        {
-            if (this.TimingOK)
-            {
-                List<Ruminant> herd = CurrentHerd(false);
-                if (numberToTag > 0)
-                {
-                    foreach (RuminantGroup item in FindAllChildren<RuminantGroup>())
-                    {
-                        foreach (Ruminant ind in herd.Filter(item).Where(a => (ApplicationStyle == TagApplicationStyle.Add)? !a.TagExists(TagLabel): a.TagExists(TagLabel)).Take(numberToTag))
+                        if(valueToSupply.Key.type != "RuminantGroup")
                         {
-                            this.Status = ActivityStatus.Success;
-                            switch (ApplicationStyle)
-                            {
-                                case TagApplicationStyle.Add:
-                                    ind.TagAdd(TagLabel);
-                                    break;
-                                case TagApplicationStyle.Remove:
-                                    ind.TagRemove(TagLabel);
-                                    break;
-                            }
-                            numberToTag--;
+                            throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
                         }
-                    }
-                    if(filterGroupsCount == 0)
-                    {
-                        foreach (Ruminant ind in herd.Where(a => (ApplicationStyle == TagApplicationStyle.Add) ? !a.TagExists(TagLabel) : a.TagExists(TagLabel)).Take(numberToTag))
-                        {
-                            this.Status = ActivityStatus.Success;
-                            switch (ApplicationStyle)
-                            {
-                                case TagApplicationStyle.Add:
-                                    ind.TagAdd(TagLabel);
-                                    break;
-                                case TagApplicationStyle.Remove:
-                                    ind.TagRemove(TagLabel);
-                                    break;
-                            }
-                            numberToTag--;
-                        }
-                    }
-                }
-                else
-                {
-                    this.Status = ActivityStatus.NotNeeded;
+                        break;
                 }
             }
-            else
-            {
-                this.Status = ActivityStatus.Ignored;
-            }
-        }
-
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
             return null;
         }
 
-        /// <summary>
-        /// Resource shortfall event handler
-        /// </summary>
-        public override event EventHandler ResourceShortfallOccurred;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnShortfallOccurred(EventArgs e)
+        /// <inheritdoc/>
+        protected override void AdjustResourcesForTimestep()
         {
-            ResourceShortfallOccurred?.Invoke(this, e);
+            IEnumerable<ResourceRequest> shortfalls = MinimumShortfallProportion();
+            if (shortfalls.Any())
+            {
+                // find shortfall by identifiers as these may have different influence on outcome
+                var tagsShort = shortfalls.FirstOrDefault();
+                if (tagsShort != null)
+                {
+                    numberToSkip = Convert.ToInt32(numberToDo * (1 - tagsShort.Available / tagsShort.Required));
+                    if (numberToSkip == numberToDo)
+                    {
+                        Status = ActivityStatus.Warning;
+                        AddStatusMessage("Resource shortfall prevented any action");
+                    }
+                }
+            }
         }
 
-        /// <summary>
-        /// Resource shortfall occured event handler
-        /// </summary>
-        public override event EventHandler ActivityPerformed;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnActivityPerformed(EventArgs e)
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
-            ActivityPerformed?.Invoke(this, e);
+            if(numberToDo - numberToSkip > 0)
+            {
+                int tagged = 0;
+                foreach (Ruminant ruminant in uniqueIndividuals.SkipLast(numberToSkip).ToList())
+                {
+                    switch (ApplicationStyle)
+                    {
+                        case TagApplicationStyle.Add:
+                            ruminant.Attributes.Add(TagLabel);
+                            break;
+                        case TagApplicationStyle.Remove:
+                            ruminant.Attributes.Add(TagLabel);
+                            break;
+                    }
+                    tagged++;
+                }
+                SetStatusSuccessOrPartial(tagged != numberToDo);
+            }
         }
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
-            string tagstring = "";
-            if (TagLabel != null && TagLabel != "")
-            {
-                tagstring = "<span class=\"setvalue\">" + TagLabel + "</span> ";
-            }
-            else
-            {
-                tagstring = "<span class=\"errorlink\">[NOT SET]</span> ";
-            }
-            return $"\r\n<div class=\"activityentry\">{ApplicationStyle} the tag {tagstring} {((ApplicationStyle == TagApplicationStyle.Add)?"to":"from")} all individuals in the following groups</div>";
+            return $"\r\n<div class=\"activityentry\">{CLEMModel.DisplaySummaryValueSnippet(ApplicationStyle)} the tag {CLEMModel.DisplaySummaryValueSnippet(TagLabel)} {((ApplicationStyle == TagApplicationStyle.Add)?"to":"from")} all individuals in the following groups</div>";
         }
         #endregion
     }

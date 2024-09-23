@@ -1,6 +1,7 @@
-﻿namespace Models.Surface
+﻿using System;
+
+namespace Models.Surface
 {
-    using System;
 
     /// <summary>
     /// Encapsulates a residue type for SurfaceOrganicMatter model

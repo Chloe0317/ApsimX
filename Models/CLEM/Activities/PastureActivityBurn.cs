@@ -1,30 +1,36 @@
 ﻿using Models.Core;
-using Models.CLEM.Groupings;
 using Models.CLEM.Resources;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Models.Core.Attributes;
 using System.IO;
+using Models.CLEM.Interfaces;
+using APSIM.Shared.Utilities;
 
 namespace Models.CLEM.Activities
 {
     /// <summary>Activity to perform controlled burning of native pastures</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CLEMActivityBase))]
     [ValidParent(ParentType = typeof(ActivitiesHolder))]
     [ValidParent(ParentType = typeof(ActivityFolder))]
-    [Description("This activity applies controlled burning to a specified graze food store (i.e. native pasture paddock).")]
+    [Description("Apply controlled burning to a specified graze food store (i.e. native pasture paddock)")]
     [Version(1, 0, 1, "")]
     [HelpUri(@"Content/Features/Activities/Pasture/BurnPasture.htm")]
-    public class PastureActivityBurn: CLEMActivityBase
+    public class PastureActivityBurn: CLEMActivityBase, IHandlesActivityCompanionModels
     {
+        private GrazeFoodStoreType pasture;
+        private GreenhouseGasesType methaneStore;
+        private GreenhouseGasesType n2oStore;
+        private double areaToDo;
+        private double pastureToDo;
+        private double areaToSkip;
+
         /// <summary>
         /// Minimum proportion green for fire to carry
         /// </summary>
@@ -37,7 +43,7 @@ namespace Models.CLEM.Activities
         /// Name of graze food store/paddock to burn
         /// </summary>
         [Description("Name of graze food store/paddock to burn")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMResourceGroups = new Type[] { typeof(GrazeFoodStore) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { typeof(GrazeFoodStore) } })]
         [Required(AllowEmptyStrings = false)]
         public string PaddockName { get; set; }
 
@@ -45,7 +51,7 @@ namespace Models.CLEM.Activities
         /// Methane store for emissions
         /// </summary>
         [Description("Greenhouse gas store for methane emissions")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMExtraEntries = new string[] { "Use store named Methane if present" }, CLEMResourceGroups = new Type[] { typeof(GreenhouseGases) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { "Use store named Methane if present", typeof(GreenhouseGases) } })]
         [System.ComponentModel.DefaultValue("Use store named Methane if present")]
         public string MethaneStoreName { get; set; }
 
@@ -53,13 +59,25 @@ namespace Models.CLEM.Activities
         /// Nitrous oxide store for emissions
         /// </summary>
         [Description("Greenhouse gas store for nitrous oxide emissions")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMExtraEntries = new string[] { "Use store named N2O if present" }, CLEMResourceGroups = new Type[] { typeof(GreenhouseGases) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { "Use store named N2O if present", typeof(GreenhouseGases) } })]
         [System.ComponentModel.DefaultValue("Use store named N2O if present")]
         public string NitrousOxideStoreName { get; set; }
 
-        private GrazeFoodStoreType pasture { get; set; }
-        private GreenhouseGasesType methaneStore { get; set; }
-        private GreenhouseGasesType n2oStore { get; set; }
+        /// <summary>
+        /// Burning efficency
+        /// </summary>
+        [Description("Biomass burning efficiency")]
+        [System.ComponentModel.DefaultValue(0.76)]
+        [Required, GreaterThanValue(0)]
+        public double BurningEfficiency { get; set; }
+
+        /// <summary>
+        /// Carbon content
+        /// </summary>
+        [Description("Carbon content of fuel")]
+        [System.ComponentModel.DefaultValue(0.46)]
+        [Required, GreaterThanValue(0)]
+        public double CarbonContent { get; set; }
 
         /// <summary>
         /// Constructor
@@ -76,182 +94,134 @@ namespace Models.CLEM.Activities
         private void OnCLEMInitialiseActivity(object sender, EventArgs e)
         {
             // get pasture
-            pasture = Resources.GetResourceItem(this, PaddockName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as GrazeFoodStoreType;
+            pasture = Resources.FindResourceType<GrazeFoodStore, GrazeFoodStoreType>(this, PaddockName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
 
             if (MethaneStoreName is null || MethaneStoreName == "Use store named Methane if present")
-            {
-                methaneStore = Resources.GetResourceItem(this, typeof(GreenhouseGases), "Methane", OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore) as GreenhouseGasesType;
-            }
+                methaneStore = Resources.FindResourceType<GreenhouseGases, GreenhouseGasesType>(this, "Methane", OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore);
             else
-            {
-                methaneStore = Resources.GetResourceItem(this, MethaneStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as GreenhouseGasesType;
-            }
+                methaneStore = Resources.FindResourceType<GreenhouseGases, GreenhouseGasesType>(this, MethaneStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
+
             if (NitrousOxideStoreName is null || NitrousOxideStoreName == "Use store named N2O if present")
-            {
-                n2oStore = Resources.GetResourceItem(this, typeof(GreenhouseGases), "N2O", OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore) as GreenhouseGasesType;
-            }
+                n2oStore = Resources.FindResourceType<GreenhouseGases, GreenhouseGasesType>(this, "N2O", OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore);
             else
+                n2oStore = Resources.FindResourceType<GreenhouseGases, GreenhouseGasesType>(this, NitrousOxideStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop);
+        }
+
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
+        {
+            switch (type)
             {
-                n2oStore = Resources.GetResourceItem(this, NitrousOxideStoreName, OnMissingResourceActionTypes.ReportErrorAndStop, OnMissingResourceActionTypes.ReportErrorAndStop) as GreenhouseGasesType;
+                case "ActivityFee":
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>(),
+                        measures: new List<string>() {
+                            "fixed",
+                            "per ha to burn",
+                        }
+                        );
+                default:
+                    return new LabelsForCompanionModels();
             }
         }
 
-        /// <summary>
-        /// Method to determine resources required for this activity in the current month
-        /// </summary>
-        /// <returns>List of required resource requests</returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
-            List<ResourceRequest> resourcesNeeded = new List<ResourceRequest>();
-            return resourcesNeeded;
-        }
-
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
-        {
-            // labour is consumed and shortfall has no impact at present
-            // could lead to other paddocks burning in future.
-
-            if(Status != ActivityStatus.Partial)
-            {
-                Status = ActivityStatus.NotNeeded;
-            }
+            areaToSkip = 0;
+            areaToDo = pasture.Manager.Area;
             // proportion green
-            double green = pasture.Pools.Where(a => a.Age < 2).Sum(a => a.Amount);
-            double total = pasture.Amount;
-            if (total>0)
+            double greenPasture = pasture.Pools.Where(a => a.Age < 2).Sum(a => a.Amount);
+            pastureToDo = pasture.Amount;
+            if (pastureToDo > 0)
             {
-                if(green / total <= MinimumProportionGreen)
+                if (MathUtilities.IsGreaterThan(greenPasture / pastureToDo, MinimumProportionGreen))
                 {
-                    // TODO add weather to calculate fire intensity
-                    // TODO calculate patchiness from intensity
-                    // TODO influence trees and weeds
-
-                    // burn
-                    // remove biomass
-                    pasture.Remove(new ResourceRequest()
-                    {
-                        ActivityModel = this,
-                        Required = total,
-                        AllowTransmutation = false,
-                        Category = "Burn",
-                        ResourceTypeName = PaddockName,
-                    }
-                    );
-
-                    // add emissions
-                    double burnkg = total * 0.76 * 0.46; // burnkg * burning efficiency * carbon content
-                    if (methaneStore != null)
-                    {
-                        //TODO change emissions for green material
-                        methaneStore.Add(burnkg * 1.333 * 0.0035, this, PaddockName, "Burn emissions"); // * 21; // methane emissions from fire (CO2 eq)
-                    }
-                    if (n2oStore != null)
-                    {
-                        n2oStore.Add(burnkg * 1.571 * 0.0076 * 0.12, this, PaddockName, "Burn emissions"); // * 21; // N20 emissions from fire (CO2 eq)
-                    }
-
-                    // TODO: add fertilisation to pasture for given period.
-
-                    Status = ActivityStatus.Success;
+                    areaToSkip = areaToDo;
+                    Status = ActivityStatus.Warning;
+                    AddStatusMessage("Too green to burn");
                 }
             }
-        }
 
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
+            {
+                switch (valueToSupply.Key.unit)
+                {
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
+                        break;
+                    case "per ha to burn":
+                        valuesForCompanionModels[valueToSupply.Key] = areaToDo - areaToSkip;
+                        break;
+                    default:
+                        throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
+                }
+            }
             return null;
         }
 
-        /// <summary>
-        /// Determines how much labour is required from this activity based on the requirement provided
-        /// </summary>
-        /// <param name="requirement">The details of how labour are to be provided</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
-            double daysNeeded;
-            double numberUnits;
-            switch (requirement.UnitType)
+            if(areaToDo - areaToSkip > 0)
             {
-                case LabourUnitType.Fixed:
-                    daysNeeded = requirement.LabourPerUnit;
-                    break;
-                case LabourUnitType.perHa:
-                    numberUnits = (pasture.Manager.Area * (Resources.GetResourceGroupByType(typeof(Land)) as Land).UnitsOfAreaToHaConversion) / requirement.UnitSize;
-                    if (requirement.WholeUnitBlocks)
-                    {
-                        numberUnits = Math.Ceiling(numberUnits);
-                    }
+                // remove biomass
+                pasture.Remove(new ResourceRequest()
+                {
+                    ActivityModel = this,
+                    Required = pastureToDo,
+                    AllowTransmutation = false,
+                    Category = TransactionCategory,
+                    ResourceTypeName = PaddockName,
+                    Resource = pasture
+                }
+                );
 
-                    daysNeeded = numberUnits * requirement.LabourPerUnit;
-                    break;
-                default:
-                    throw new Exception(String.Format("LabourUnitType {0} is not supported for {1} in {2}", requirement.UnitType, requirement.Name, this.Name));
+                // add emissions
+                double burnkg = pastureToDo * BurningEfficiency * CarbonContent; // burnkg * burning efficiency * carbon content
+                if (methaneStore != null)
+                    //TODO change emissions for green material
+                    methaneStore.Add(burnkg * 1.333 * 0.0035, this, PaddockName, TransactionCategory); // * 21; // methane emissions from fire (CO2 eq)
+
+                if (n2oStore != null)
+                    n2oStore.Add(burnkg * 1.571 * 0.0076 * 0.12, this, PaddockName, TransactionCategory); // * 21; // N20 emissions from fire (CO2 eq)
+
+                // TODO: add fertilisation to pasture for given period.
+
             }
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, "Burn", pasture.NameWithParent);
-        }
-
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            return;
+            SetStatusSuccessOrPartial(areaToSkip > 0);
         }
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
-                htmlWriter.Write("\r\n<div class=\"activityentry\">Burn ");
-
-                if (PaddockName == null || PaddockName == "")
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[Pasture NOT SET]</span>");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"resourcelink\">" + PaddockName + "</span>");
-                }
-                htmlWriter.Write("if less than <span class=\"setvalue\">" + (MinimumProportionGreen).ToString("0.#%") + "</span> green.</div>");
+                htmlWriter.Write($"\r\n<div class=\"activityentry\">Burn {DisplaySummaryResourceTypeSnippet(PaddockName, "Pasture Not Set", nullGeneralYards: false)}");
+                htmlWriter.Write($" if less than {DisplaySummaryValueSnippet(MinimumProportionGreen.ToString("0.#%"), warnZero: true)} green.");
+                htmlWriter.Write($" with a burning efficiency of {DisplaySummaryValueSnippet(BurningEfficiency, warnZero: true)} and ");
+                htmlWriter.Write($" and a carbon content of {DisplaySummaryValueSnippet(CarbonContent, warnZero: true)}");
                 htmlWriter.Write("</div>");
 
                 htmlWriter.Write("\r\n<div class=\"activityentry\">Methane emissions will be placed in ");
                 if (MethaneStoreName is null || MethaneStoreName == "Use store named Methane if present")
-                {
                     htmlWriter.Write("<span class=\"resourcelink\">[GreenhouseGases].Methane</span> if present");
-                }
                 else
-                {
                     htmlWriter.Write($"<span class=\"resourcelink\">{MethaneStoreName}</span>");
-                }
+
                 htmlWriter.Write("</div>");
 
                 htmlWriter.Write("\r\n<div class=\"activityentry\">Nitrous oxide emissions will be placed in ");
                 if (NitrousOxideStoreName is null || NitrousOxideStoreName == "Use store named N2O if present")
-                {
                     htmlWriter.Write("<span class=\"resourcelink\">[GreenhouseGases].N2O</span> if present");
-                }
                 else
-                {
                     htmlWriter.Write($"<span class=\"resourcelink\">{NitrousOxideStoreName}</span>");
-                }
-                htmlWriter.Write("</div>");
 
+                htmlWriter.Write("</div>");
                 return htmlWriter.ToString(); 
             }
         } 

@@ -1,26 +1,20 @@
-﻿using System.IO;
-using System.Xml;
-using Models.Core;
-using Newtonsoft.Json;
-using System;
-using System.Reflection;
+﻿using System;
 using System.Collections.Generic;
-using Models.Factorial;
-using APSIM.Shared.Utilities;
+using System.IO;
 using System.Linq;
-using Models.Core.Interfaces;
-using Models.Storage;
-using Newtonsoft.Json.Serialization;
+using System.Reflection;
+using APSIM.Shared.Documentation;
+using APSIM.Shared.Utilities;
 using Models.Core.ApsimFile;
+using Models.Core.Interfaces;
 using Models.Core.Run;
+using Models.Storage;
+using Newtonsoft.Json;
 
 namespace Models.Core
 {
     /// <summary>
-    /// # [Name]
-    /// Encapsulates a collection of simulations. It is responsible for creating this collection,
-    /// changing the structure of the components within the simulations, renaming components, adding
-    /// new ones, deleting components. The user interface talks to an instance of this class.
+    /// Encapsulates a collection of simulations. It is responsible for creating this collection, changing the structure of the components within the simulations, renaming components, adding new ones, deleting components. The user interface talks to an instance of this class.
     /// </summary>
     [Serializable]
     [ScopedModel]
@@ -30,10 +24,6 @@ namespace Models.Core
     {
         [NonSerialized]
         private Links links;
-
-        /// <summary>Gets or sets the width of the explorer.</summary>
-        /// <value>The width of the explorer.</value>
-        public Int32 ExplorerWidth { get; set; }
 
         /// <summary>Gets or sets the version.</summary>
         [System.Xml.Serialization.XmlAttribute("Version")]
@@ -102,7 +92,7 @@ namespace Models.Core
         /// <summary>
         /// Return the current APSIM version number.
         /// </summary>
-        public string ApsimVersion
+        public static string ApsimVersion
         {
             get
             {
@@ -156,7 +146,7 @@ namespace Models.Core
                 storage.Reader.Refresh();
             }
             List<Exception> creationExceptions = new List<Exception>();
-            return FileFormat.ReadFromFile<Simulations>(FileName, out creationExceptions);
+            return FileFormat.ReadFromFile<Simulations>(FileName, e => throw e, false).NewModel as Simulations;
         }
 
         /// <summary>Write the specified simulation set to the specified filename</summary>
@@ -174,6 +164,42 @@ namespace Models.Core
                 File.Move(FileName, bakFileName);
             File.Move(tempFileName, FileName);
             this.FileName = FileName;
+            SetFileNameInAllSimulations();
+        }
+
+        /// <summary>Write the specified simulation set to the specified directory path.</summary>
+        /// <param name="currentFileName">FileName property of the simulation set.</param>
+        /// <param name="savePath">The location where the simulation should be saved.</param>
+        public void Write(string currentFileName, string savePath) // TODO: needs testing in conjunction with Main.cs --apply switch.
+        {
+            try
+            {
+                string tempFileName = Path.GetTempFileName();
+                File.WriteAllText(tempFileName, FileFormat.WriteToString(this));
+
+                // If we get this far without an exception then copy the tempfilename over our filename,
+                // creating a backup (.bak) in the process.
+                string bakFileName = currentFileName + ".bak";
+                File.Delete(bakFileName);
+                if (File.Exists(currentFileName))
+                    File.Move(currentFileName, bakFileName);
+                File.Move(tempFileName, currentFileName);
+                File.Move(currentFileName, savePath, true);
+                this.FileName = savePath;
+                SetFileNameInAllSimulations();
+            }
+            catch (Exception e)
+            {
+                throw new Exception($"An error occured trying to save a simulation to {savePath}. {e}");
+            }
+
+        }
+
+        /// <summary>
+        /// Resets the FileName property of each Simulation model in the APSIMX file.
+        /// </summary>
+        public void ResetSimulationFileNames()
+        {
             SetFileNameInAllSimulations();
         }
 
@@ -201,7 +227,7 @@ namespace Models.Core
         {
             links = null;
         }
-        
+
         /// <summary>
         /// Gets the services objects.
         /// </summary>
@@ -239,14 +265,29 @@ namespace Models.Core
         }
 
         /// <summary>Find all referenced files from all models.</summary>
-        public IEnumerable<string> FindAllReferencedFiles()
+        public IEnumerable<string> FindAllReferencedFiles(bool isAbsolute = true)
         {
             SortedSet<string> fileNames = new SortedSet<string>();
-            foreach (IReferenceExternalFiles model in this.FindAllDescendants<IReferenceExternalFiles>())
+            foreach (IReferenceExternalFiles model in this.FindAllDescendants<IReferenceExternalFiles>().Where(m => m.Enabled))
                 foreach (string fileName in model.GetReferencedFileNames())
-                    fileNames.Add(PathUtilities.GetAbsolutePath(fileName, FileName));
-            
+                    if (isAbsolute == true)
+                    {
+                        fileNames.Add(PathUtilities.GetAbsolutePath(fileName, FileName));
+                    }
+                    else
+                    {
+                        fileNames.Add(fileName);
+                    }
             return fileNames;
+        }
+
+        /// <summary>
+        /// Get a list of tags which describe the model.
+        /// </summary>
+        public override IEnumerable<ITag> Document()
+        {
+            foreach (ITag tag in Children.SelectMany(c => c.Document()))
+                yield return tag;
         }
 
         /// <summary>Documents the specified model.</summary>
@@ -283,6 +324,10 @@ namespace Models.Core
 
                     Simulation clonedSimulation = simDescription.ToSimulation();
 
+                    // Prepare the simulation for running - this perform misc cleanup tasks such
+                    // as removing disabled models, standardising the soil, resolving links, etc.
+                    clonedSimulation.Prepare();
+                    FindInScope<IDataStore>().Writer.Stop();
                     // Now use the path to get the model we want to document.
                     modelToDocument = clonedSimulation.FindByPath(pathOfModelToDocument)?.Value as IModel;
 
@@ -292,10 +337,8 @@ namespace Models.Core
                     // resolve all links in cloned simulation.
                     Links.Resolve(clonedSimulation, true);
 
-                    modelToDocument.IncludeInDocumentation = true;
-
                     // Document the model.
-                    AutoDocumentation.DocumentModel(modelToDocument, tags, headingLevel, 0, documentAllChildren:true);
+                    AutoDocumentation.DocumentModel(modelToDocument, tags, headingLevel, 0, documentAllChildren: true);
 
                     // Unresolve links.
                     Links.Unresolve(clonedSimulation, true);

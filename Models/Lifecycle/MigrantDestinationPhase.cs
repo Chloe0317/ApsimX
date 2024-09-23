@@ -1,10 +1,9 @@
-﻿namespace Models.LifeCycle
+﻿using System;
+using Models.Core;
+using Models.Functions;
+
+namespace Models.LifeCycle
 {
-    using Models.Core;
-    using Models.Functions;
-    using Newtonsoft.Json;
-    using System;
-    using System.Collections.Generic;
 
     /// <summary>
     /// This class specifies which life cycle and which phase the progeny of the parent 
@@ -14,7 +13,7 @@
     /// </summary>
 
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(LifeCyclePhase))]
     public class MigrantDestinationPhase : Model

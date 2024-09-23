@@ -1,12 +1,10 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 namespace APSIM.Shared.Utilities
 {
-    using System;
-    using System.Collections;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Globalization;
-    using System.Linq;
-
     /// <summary>
     /// Various math utilities.
     /// </summary>
@@ -53,7 +51,7 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static bool IsGreaterThanOrEqual(double value1, double value2)
         {
-            return (value1 - value2) >= tolerance;
+            return (value1 - value2) >= tolerance || FloatsAreEqual(value1, value2);
         }
 
         /// <summary>
@@ -69,7 +67,7 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static bool IsLessThanOrEqual(double value1, double value2)
         {
-            return (value2 - value1) >= tolerance;
+            return (value2 - value1) >= tolerance || FloatsAreEqual(value1, value2);
         }
 
         /// <summary>
@@ -196,7 +194,10 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static double Divide(double value1, double value2, double errVal)
         {
-            return MathUtilities.FloatsAreEqual(value2, 0.0) ? errVal : value1 / value2;
+            double returnValue = value1 / value2;
+            if (double.IsInfinity(returnValue) || double.IsNaN(returnValue))
+                return errVal;
+            return returnValue;
         }
 
         /// <summary>
@@ -220,13 +221,13 @@ namespace APSIM.Shared.Utilities
         /// Perform a stepwise addition of the values in value 1 with the values in value2.
         /// Returns an array of the same size as value 1 and value 2
         /// </summary>
-        public static double[] Add(double[] value1, double[] value2)
+        public static double[] Add(IReadOnlyList<double> value1, IReadOnlyList<double> value2)
         {
             double[] results = null;
-            if (value1.Length == value2.Length)
+            if (value1.Count == value2.Count)
             {
-                results = new double[value1.Length];
-                for (int iIndex = 0; iIndex < value1.Length; iIndex++)
+                results = new double[value1.Count];
+                for (int iIndex = 0; iIndex < value1.Count; iIndex++)
                 {
                     if (value1[iIndex] == MissingValue || value2[iIndex] == MissingValue)
                         results[iIndex] = MissingValue;
@@ -320,6 +321,8 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         public static double Average(IEnumerable Values)
         {
+            if (Values == null)
+                return 0;
             double Sum = 0.0;
             int Count = 0;
             foreach (object Value in Values)
@@ -404,6 +407,21 @@ namespace APSIM.Shared.Utilities
         }
 
         /// <summary>
+        /// Returns the difference between X and Y if the difference is positive, otherwise returns 0 if negative.
+        /// Is based on the Fortran DIM function
+        /// </summary>
+        /// <returns></returns>
+        static public double PositiveDifference(double X, double Y)
+        {
+            double difference = X - Y;
+            if (difference > 0)
+                return difference;
+            else
+                return 0;
+
+        }
+
+        /// <summary>
         ///Linearly interpolates a value y for a given value x and a given
         ///set of xy co-ordinates.
         ///When x lies outside the x range_of, y is set to the boundary condition.
@@ -481,6 +499,48 @@ namespace APSIM.Shared.Utilities
             double Multiplier = System.Math.Pow(10.0, NumDecPlaces);  // gives 1 or 10 or 100 for decplaces=0, 1, or 2 etc
             Value = System.Math.Truncate(Value * Multiplier + 0.5);
             return Value / Multiplier;
+        }
+
+        /// <summary>
+        /// Round the specified number to the specified number of decimal places.
+        /// This allows numbers less than 1 to be rounded to the nearest sig fig.
+        /// Uses Demical to maintain correctness.
+        /// </summary>
+        /// <param name="Value"></param>
+        /// <param name="NumDecPlaces"></param>
+        /// <returns></returns>
+        static public double RoundSignificant(double Value, int NumDecPlaces)
+        {
+            if (Value == 0) 
+                return 0;
+
+            Decimal v = (Decimal)Value;
+            bool isNegative = false;
+            if (Value < 0)
+            {
+                isNegative = true;
+                v = Math.Abs(v);
+            }
+
+            int count = 0;
+            while(v < 1)
+            {
+                v = v * 10;
+                count += 1;
+            }
+
+            v = Decimal.Round(v, NumDecPlaces);
+
+            while (count > 0)
+            {
+                v = v * (Decimal)0.1;
+                count -= 1;
+            }
+
+            if (isNegative)
+                return -(double)v;
+            else
+                return (double)v;
         }
 
         /// <summary>
@@ -649,7 +709,7 @@ namespace APSIM.Shared.Utilities
             {
                 foreach (string Value in Values)
                 {
-                    if (Value != "")
+                    if (!string.IsNullOrEmpty(Value))
                         return true;
                 }
             }
@@ -1139,6 +1199,34 @@ namespace APSIM.Shared.Utilities
         public static double Bound(double x, double x1, double x2)
         {
             return System.Math.Min(System.Math.Max(x, x1), x2);
+        }
+
+        /// <summary>
+        /// Get the min/max values of a list of x/y pairs. Ignores values
+        /// where the x or y value at a particular index is NaN.
+        /// </summary>
+        /// <param name="x">X values.</param>
+        /// <param name="y">Y values.</param>
+        /// <param name="minX">Smallest x value.</param>
+        /// <param name="maxX">Largest x value.</param>
+        /// <param name="minY">Smallest y value.</param>
+        /// <param name="maxY">Largest y value.</param>
+        public static void GetBounds(IEnumerable<double> x, IEnumerable<double> y, out double minX, out double maxX, out double minY, out double maxY)
+        {
+            if (!(x.Any() && y.Any()))
+                throw new ArgumentException("x is empty");
+            minX = minY = double.MaxValue;
+            maxX = maxY = double.MinValue;
+            foreach ((double xi, double yi) in x.Zip(y, (xi, yi) => (xi, yi)))
+            {
+                if (!double.IsNaN(xi) && !double.IsNaN(yi))
+                {
+                    minX = Math.Min(minX, xi);
+                    minY = Math.Min(minY, yi);
+                    maxX = Math.Max(maxX, xi);
+                    maxY = Math.Max(maxY, yi);
+                }
+            }
         }
 
         /// <summary>
@@ -1713,12 +1801,15 @@ namespace APSIM.Shared.Utilities
         /// </summary>
         /// <param name="items">List to search.</param>
         /// <param name="value">Item to search for.</param>
-        public static int SafeIndexOf(List<double> items, double value)
+        public static int SafeIndexOf(IEnumerable<double> items, double value)
         {
-            items.IndexOf(value);
-            for (int i = 0; i < items.Count; i++)
-                if (FloatsAreEqual(items[i], value))
+            int i = 0;
+            foreach (double item in items)
+            {
+                if (FloatsAreEqual(item, value))
                     return i;
+                i++;
+            }
             return -1;
         }
 
@@ -1754,5 +1845,82 @@ namespace APSIM.Shared.Utilities
             // add a space so that we always have something
             return returnStr;
         }
+
+        /// <summary>Changes all missing values in an array to a valid value.</summary>
+        /// <param name="values">The values to in fill.</param>
+        /// <param name="numValues">The number of values that should exist.</param>
+        /// <param name="defaultValue">The value to use if can't find any other value.</param>
+        public static double[] FillMissingValues(double[] values, int numValues, double defaultValue)
+        {
+            int numOriginalValues = 0;
+            if (values != null)
+                numOriginalValues = values.Length;
+            Array.Resize(ref values, numValues);
+            for (int i = 0; i < numValues; i++)
+            {
+                if (i >= numOriginalValues || double.IsNaN(values[i]))
+                {
+                    double validValue;
+                    if (i == 0)
+                        validValue = FindFirstValueInArray(values);
+                    else
+                        validValue = values[i - 1];
+
+                    if (double.IsNaN(validValue))
+                        values[i] = defaultValue;
+                    else
+                        values[i] = validValue;
+                }
+            }
+            return values;
+        }
+
+        /// <summary>
+        /// Ensure an array is the correct size.
+        /// </summary>
+        /// <param name="arr">The array.</param>
+        /// <param name="numValues">The required size.</param>
+        /// <returns>The new array of the correct size.</returns>
+        public static double[] SetArrayOfCorrectSize(double[] arr, int numValues)
+        {
+            if (arr == null)
+                arr = Enumerable.Repeat(double.NaN, numValues).ToArray();
+            else
+            {
+                int bottomIndexOfValues = arr.Length;
+                Array.Resize(ref arr, numValues);
+                for (int i = bottomIndexOfValues; i < numValues; i++)
+                    arr[i] = double.NaN;
+            }
+
+            return arr;
+        }          
+
+        /// <summary>
+        /// Ensure an array is the correct size.
+        /// </summary>
+        /// <param name="arr">The array.</param>
+        /// <param name="numValues">The required size.</param>
+        /// <returns>The new array of the correct size.</returns>
+        public static string[] SetArrayOfCorrectSize(string[] arr, int numValues)
+        {
+            Array.Resize(ref arr, numValues);
+            return arr;
+        }         
+
+        /// <summary>
+        /// Find the first non NaN value in the array.
+        /// </summary>
+        /// <param name="values"></param>
+        /// <returns></returns>
+        private static double FindFirstValueInArray(double[] values)
+        {
+            for (int j = 0; j < values.Length; j++)
+                if (!double.IsNaN(values[j]))
+                    return values[j];
+
+            return double.NaN;
+        }
+     
     }
 }

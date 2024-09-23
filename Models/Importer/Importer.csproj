@@ -3,10 +3,16 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
+    <BaseOutputPath>../../bin</BaseOutputPath>
     <ApplicationIcon />
     <StartupObject />
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
-
+  
+  <PropertyGroup>
+   <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+  
   <ItemGroup>
     <None Remove="StyleCop.Cache" />
   </ItemGroup>
@@ -16,6 +22,7 @@
 
   <PropertyGroup>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
 </Project>

@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using Models.Core;
 
 namespace Models.Soils
@@ -10,7 +7,7 @@ namespace Models.Soils
     /// SWIM sub surface drain model
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(Swim3))]
     public class SwimSubsurfaceDrain : Model

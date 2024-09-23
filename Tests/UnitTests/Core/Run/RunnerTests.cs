@@ -9,6 +9,7 @@
     using NUnit.Framework;
     using System;
     using System.Collections.Generic;
+    using System.Data;
     using System.IO;
     using System.Linq;
     using UnitTests.Storage;
@@ -22,7 +23,6 @@
 
         private static RunTypeEnum[] runTypes = new RunTypeEnum[]
         {
-            RunTypeEnum.MultiProcess,
             RunTypeEnum.MultiThreaded,
             RunTypeEnum.SingleThreaded
         };
@@ -82,13 +82,16 @@
 
                 // Run simulations.
                 Runner runner = new Runner(simulation, runType: typeOfRun);
-                Assert.IsNull(runner.Run());
+                List<Exception> errors = runner.Run();
+                Assert.That(errors, Is.Not.Null);
+                Assert.That(errors.Count, Is.EqualTo(0));
 
-                // Check that data was written to database.
-                Assert.AreEqual(Utilities.TableToStringUsingSQL(database, "SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]"),
-                       "Clock.Today\r\n" +
-                       " 1980-01-01\r\n" +
-                       " 1980-01-02\r\n");
+
+                Assert.That(
+                    Utilities.CreateTable(new string[]                      {              "Clock.Today" },
+                                          new List<object[]> { new object[] { new DateTime(1980, 01, 01) },
+                                                               new object[] { new DateTime(1980, 01, 02) }})
+                   .IsSame(database.ExecuteQuery("SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]")), Is.True);
 
                 database.CloseDatabase();
             }
@@ -156,15 +159,19 @@
                 Runner runner = new Runner(folder, runType: typeOfRun);
 
                 // Run simulations.
-                Assert.IsNull(runner.Run());
+                List<Exception> errors = runner.Run();
+                Assert.That(errors, Is.Not.Null);
+                Assert.That(errors.Count, Is.EqualTo(0));
 
                 // Check that data was written to database.
-                Assert.AreEqual(Utilities.TableToStringUsingSQL(database, "SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]"),
-                       "Clock.Today\r\n" +
-                       " 1980-01-01\r\n" +
-                       " 1980-01-02\r\n" +
-                       " 1980-01-03\r\n" +
-                       " 1980-01-04\r\n");
+
+                Assert.That(
+                    Utilities.CreateTable(new string[]                      {               "Clock.Today" },
+                                          new List<object[]> { new object[] { new DateTime(1980, 01, 01) },
+                                                               new object[] { new DateTime(1980, 01, 02) },
+                                                               new object[] { new DateTime(1980, 01, 03) },
+                                                               new object[] { new DateTime(1980, 01, 04) }})
+                   .IsSame(database.ExecuteQuery("SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]")), Is.True);
 
                 database.CloseDatabase();
             }
@@ -232,13 +239,16 @@
                 Runner runner = new Runner(folder, runType: typeOfRun, simulationNamesToRun: new string[] { "Sim1" });
 
                 // Run simulations.
-                Assert.IsNull(runner.Run());
+                List<Exception> errors = runner.Run();
+                Assert.That(errors, Is.Not.Null);
+                Assert.That(errors.Count, Is.EqualTo(0));
 
                 // Check that data was written to database.
-                Assert.AreEqual(Utilities.TableToStringUsingSQL(database, "SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]"),
-                       "Clock.Today\r\n" +
-                       " 1980-01-01\r\n" +
-                       " 1980-01-02\r\n");
+                Assert.That(
+                    Utilities.CreateTable(new string[] { "Clock.Today" },
+                                          new List<object[]> { new object[] { new DateTime(1980, 01, 01) },
+                                                               new object[] { new DateTime(1980, 01, 02) }})
+                   .IsSame(database.ExecuteQuery("SELECT [Clock.Today] FROM Report ORDER BY [Clock.Today]")), Is.True);
 
                 database.CloseDatabase();
             }
@@ -277,7 +287,7 @@
                 var exceptions = runner.Run();
 
                 // Make sure an exception is returned.
-                Assert.IsTrue(exceptions[0].ToString().Contains("Intentional exception"));
+                Assert.That(exceptions[0].ToString().Contains("Intentional exception"), Is.True);
 
                 database.CloseDatabase();
             }
@@ -333,7 +343,7 @@
                 var exceptions = runner.Run();
 
                 // Make sure an exception is returned.
-                Assert.IsTrue(exceptions[0].ToString().Contains("Test has failed."), $"Exception message {exceptions[0].ToString()} does not contain 'Test has failed.'.");
+                Assert.That(exceptions[0].ToString().Contains("Test has failed."), Is.True, $"Exception message {exceptions[0].ToString()} does not contain 'Test has failed.'.");
 
                 database.CloseDatabase();
             }
@@ -377,7 +387,7 @@
                                             "   {\r\n" +
                                             "      [Link]\r\n" +
                                             "      ISummary summary = null;\r\n" +
-                                            "      public void Run() { summary.WriteMessage(this, \"Passed Test\"); }\r\n" +
+                                            "      public void Run() { summary.WriteMessage(this, \"Passed Test\", MessageType.Information); }\r\n" +
                                             "   }\r\n" +
                                             "}"
                                 }
@@ -388,10 +398,13 @@
 
                 // Run simulations.
                 Runner runner = new Runner(simulations, runType: typeOfRun, runTests:true);
-                Assert.IsNull(runner.Run());
+                List<Exception> errors = runner.Run();
+                Assert.That(errors, Is.Not.Null);
+                Assert.That(errors.Count, Is.EqualTo(0));
 
                 // Make sure an exception is returned.
-                Assert.IsNotNull(MockSummary.messages.Find(m => m.Contains("Passed Test")));
+                var summary = simulations.FindDescendant<MockSummary>();
+                Assert.That(summary.messages.Find(m => m.Contains("Passed Test")), Is.Not.Null);
 
                 database.CloseDatabase();
             }
@@ -433,11 +446,65 @@
                 runner.Run();
 
                 // Make sure the expected exception was sent through the all completed jobs event.
-                Assert.AreEqual(argsOfAllCompletedJobs.AllExceptionsThrown.Count, 1);
-                Assert.IsTrue(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown.Count, Is.EqualTo(1));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"), Is.True);
 
                 database.CloseDatabase();
             }
+        }
+        [Serializable]
+        private class PostSimToolWhichThrows : Model, IPostSimulationTool
+        {
+            public void Run()
+            {
+                throw new Exception("error from post-simulation tool");
+            }
+        }
+
+        /// <summary>
+        /// Ensure that only the post-simulation tools which are "in scope"
+        /// are run.
+        /// </summary>
+        [Test]
+        public void EnsureScopedPostSimulationToolsAreRun()
+        {
+            Simulation sim0 = new Simulation()
+            {
+                Name = "s0",
+                Children = new List<IModel>()
+                {
+                    new MockClock(),
+                    new MockSummary(),
+                    new PostSimToolWhichThrows()
+                }
+            };
+            Simulation sim1 = sim0.Clone();
+            sim1.Name = "s1";
+
+            Simulations sims = new Simulations()
+            {
+                Children = new List<IModel>()
+                {
+                    new MockStorage()
+                    {
+                        Children = new List<IModel>()
+                        {
+                            new PostSimToolWhichThrows()
+                        }
+                    },
+                    sim0,
+                    sim1
+                }
+            };
+            sims.ParentAllDescendants();
+
+            Runner runner = new Runner(sim1);
+            List<Exception> errors = runner.Run();
+
+            // We ran sim1 only. Therefore two post-simulation tools
+            // should have been run (the one under the simulation and the
+            // one under the datastore).
+            Assert.That(errors.Count, Is.EqualTo(2));
         }
 
         /// <summary>Ensure post simulation tools are run.</summary>
@@ -476,8 +543,8 @@
                 runner.Run();
 
                 // Make sure the expected exception was sent through the all completed jobs event.
-                Assert.AreEqual(argsOfAllCompletedJobs.AllExceptionsThrown.Count, 1);
-                Assert.IsTrue(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown.Count, Is.EqualTo(1));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"), Is.True);
 
                 database.CloseDatabase();
             }
@@ -545,7 +612,7 @@
                 "_Simulations",
                 "_Checkpoints",
             };
-            Assert.AreEqual(tablesMod.OrderBy(x => x), testPostSim.TablesModified.OrderBy(x => x));
+            Assert.That(testPostSim.TablesModified.OrderBy(x => x), Is.EqualTo(tablesMod.OrderBy(x => x)));
 
             runner = new Runner(sims, simulationNamesToRun: new[] { "sim2" });
             errors = runner.Run();
@@ -559,7 +626,7 @@
                 "_Simulations",
                 "_Checkpoints",
             };
-            Assert.AreEqual(tablesMod.OrderBy(x => x), testPostSim.TablesModified.OrderBy(x => x));
+            Assert.That(testPostSim.TablesModified.OrderBy(x => x), Is.EqualTo(tablesMod.OrderBy(x => x)));
 
             // Now run both sims
             runner = new Runner(sims);
@@ -575,7 +642,7 @@
                 "_Simulations",
                 "_Checkpoints",
             };
-            Assert.AreEqual(tablesMod.OrderBy(x => x), testPostSim.TablesModified.OrderBy(x => x));
+            Assert.That(testPostSim.TablesModified.OrderBy(x => x), Is.EqualTo(tablesMod.OrderBy(x => x)));
         }
 
         /// <summary>Ensure only post simulation tools are run when specified.</summary>
@@ -615,15 +682,70 @@
 
                 // Simulation shouldn't have run. Check the summary messages to make
                 // sure there is NOT a 'Simulation completed' message.
-                Assert.AreEqual(MockSummary.messages.Count, 0);
+                var summary = simulation.FindDescendant<MockSummary>();
+                Assert.That(summary.messages.Count, Is.EqualTo(0));
 
-                Assert.AreEqual(runner.Progress, 0);
+                Assert.That(runner.Progress, Is.EqualTo(1));
 
                 // Make sure the expected exception was sent through the all completed jobs event.
-                Assert.AreEqual(1, argsOfAllCompletedJobs.AllExceptionsThrown.Count);
-                Assert.IsTrue(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown.Count, Is.EqualTo(1));
+                Assert.That(argsOfAllCompletedJobs.AllExceptionsThrown[0].ToString().Contains("Intentional exception"), Is.True);
 
                 database.CloseDatabase();
+            }
+        }
+
+        /// <summary>
+        /// In this test, we run only post-simualtion tools and ensure
+        /// that any old data is correctly cleaned.
+        /// </summary>
+        [Test]
+        public void EnsurePostSimulationToolsDoCleanup()
+        {
+            IEnumerable<RunTypeEnum> runTypes = new[] { RunTypeEnum.MultiThreaded, RunTypeEnum.SingleThreaded };
+            foreach (RunTypeEnum runType in runTypes)
+            {
+                // Open an in-memory database.
+                database = new SQLite();
+                database.OpenDatabase(":memory:", readOnly: false);
+
+                DataTable data = new DataTable("PostSimulationTool");
+                data.Columns.Add("x");
+                data.Rows.Add(data.NewRow());
+
+                var storage = new DataStore(database)
+                {
+                    Children = new List<IModel>()
+                    {
+                        new SimpleDataWriter(data)
+                    }
+                };
+
+                var sims = new Simulations()
+                {
+                    Children = new List<IModel>()
+                    {
+                        storage
+                    }
+                };
+
+                Runner runner = new Runner(sims, runType: runType, runSimulations: false);
+                List<Exception> errors = runner.Run();
+                Assert.That(errors.Count, Is.EqualTo(0), errors.Count > 0 ? errors[0].ToString() : "");
+
+                storage.Reader.Refresh();
+                DataTable storedData = storage.Reader.GetData(data.TableName);
+                Assert.That(storedData, Is.Not.Null);
+                Assert.That(storedData.Rows.Count, Is.EqualTo(1));
+
+                // Now run it again.
+                runner = new Runner(new[] { sims }, runType: runType, runSimulations: false);
+                errors = runner.Run();
+                Assert.That(errors.Count, Is.EqualTo(0), errors.Count > 0 ? errors[0].ToString() : "");
+
+                storage.Reader.Refresh();
+                storedData = storage.Reader.GetData(data.TableName);
+                Assert.That(storedData.Rows.Count, Is.EqualTo(1), "Post-simulation tool data was not cleaned when running only post-simulation tools");
             }
         }
 
@@ -672,18 +794,22 @@
             // Check simulation 1 database
             database = new SQLite();
             database.OpenDatabase(Path.Combine(path, "Sim1.db"), readOnly: true);
-            Assert.AreEqual(Utilities.TableToStringUsingSQL(database, "SELECT [Message] FROM _Messages"),
-                   "                       Message\r\n" +
-                   "Simulation terminated normally\r\n");
+
+            Assert.That(
+                    Utilities.CreateTable(new string[]                      {                        "Message" },
+                                          new List<object[]> { new object[] { "Simulation terminated normally" }})
+                   .IsSame(database.ExecuteQuery("SELECT [Message] FROM _Messages")), Is.True);
 
             database.CloseDatabase();
 
             // Check simulation 2 database
             database = new SQLite();
             database.OpenDatabase(Path.Combine(path, "Sim2.db"), readOnly: true);
-            Assert.AreEqual(Utilities.TableToStringUsingSQL(database, "SELECT [Message] FROM _Messages"),
-                   "                       Message\r\n" +
-                   "Simulation terminated normally\r\n");
+            Assert.That(
+                    Utilities.CreateTable(new string[]                      {                        "Message" },
+                                          new List<object[]> { new object[] { "Simulation terminated normally" }})
+                   .IsSame(database.ExecuteQuery("SELECT [Message] FROM _Messages")), Is.True);
+
             database.CloseDatabase();
         }
     }

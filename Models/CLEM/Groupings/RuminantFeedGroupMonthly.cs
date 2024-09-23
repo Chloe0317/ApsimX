@@ -1,30 +1,31 @@
-﻿using Models.Core;
 using Models.CLEM.Activities;
+using Models.Core;
+using Models.Core.Attributes;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Models.Core.Attributes;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
-using Newtonsoft.Json;
-using Models.CLEM.Resources;
 using System.IO;
+using System.Linq;
 
 namespace Models.CLEM.Groupings
 {
     ///<summary>
-    /// Contains a group of filters to identify individual ruminants
-    ///</summary> 
+    /// Contains a group of filters and sorts to identify individual ruminants
+    ///</summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(RuminantActivityFeed))]
-    [Description("This ruminant filter group selects specific individuals from the ruminant herd using any number of Ruminant Filters. This filter group includes feeding rules. No filters will apply rules to current herd. Multiple feeding groups will select groups of individuals required.")]
+    [Description("Set monthly feeding values for specified individual ruminants")]
     [Version(1, 0, 1, "")]
-    [HelpUri(@"Content/Features/Filters/RuminantFeedGroupMonthly.htm")]
-    public class RuminantFeedGroupMonthly: CLEMModel, IValidatableObject, IFilterGroup
+    [HelpUri(@"Content/Features/Filters/Groups/RuminantFeedGroupMonthly.htm")]
+    public class RuminantFeedGroupMonthly : RuminantFeedGroup, IValidatableObject
     {
+        [Link]
+        private IClock clock = null;
+
         /// <summary>
         /// Daily value to supply for each month
         /// </summary>
@@ -32,17 +33,11 @@ namespace Models.CLEM.Groupings
         [Required, ArrayItemCount(12)]
         public double[] MonthlyValues { get; set; }
 
-        /// <summary>
-        /// Combined ML ruleset for LINQ expression tree
-        /// </summary>
-        [JsonIgnore]
-        public object CombinedRules { get; set; } = null;
-
-        /// <summary>
-        /// Proportion of group to use
-        /// </summary>
-        [JsonIgnore]
-        public double Proportion { get; set; }
+        /// <inheritdoc/>
+        public override double CurrentValue
+        {
+            get { return MonthlyValues[clock.Today.Month - 1]; }
+        }
 
         /// <summary>
         /// Constructor
@@ -50,7 +45,6 @@ namespace Models.CLEM.Groupings
         public RuminantFeedGroupMonthly()
         {
             MonthlyValues = new double[12];
-            base.ModelSummaryStyle = HTMLSummaryStyle.SubActivity;
         }
 
         #region validation
@@ -68,7 +62,7 @@ namespace Models.CLEM.Groupings
             {
                 if (MonthlyValues.Max() == 0)
                 {
-                    Summary.WriteWarning(this, $"No feed values were defined for any month in [{this.Name}]. No feeding will be performed for [a={this.Parent.Name}]");
+                    Summary.WriteMessage(this, $"No feed values were defined for any month in [{this.Name}]. No feeding will be performed for [a={this.Parent.Name}]", MessageType.Warning);
                 }
             }
             return results;
@@ -78,12 +72,8 @@ namespace Models.CLEM.Groupings
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
@@ -184,35 +174,10 @@ namespace Models.CLEM.Groupings
                     htmlWriter.Write("</div>");
                 }
 
-                return htmlWriter.ToString(); 
-            }
-        }
-
-        /// <summary>
-        /// Provides the closing html tags for object
-        /// </summary>
-        /// <returns></returns>
-        public override string ModelSummaryInnerClosingTags(bool formatForParentControl)
-        {
-            return "\r\n</div>";
-        }
-
-        /// <summary>
-        /// Provides the closing html tags for object
-        /// </summary>
-        /// <returns></returns>
-        public override string ModelSummaryInnerOpeningTags(bool formatForParentControl)
-        {
-            using (StringWriter htmlWriter = new StringWriter())
-            {
-                htmlWriter.Write("\r\n<div class=\"filterborder clearfix\">");
-                if (!(this.FindAllChildren<RuminantFilter>().Count() >= 1))
-                {
-                    htmlWriter.Write("<div class=\"filter\">All individuals</div>");
-                }
                 return htmlWriter.ToString();
             }
-        } 
+        }
+
         #endregion
 
     }

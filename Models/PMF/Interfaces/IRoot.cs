@@ -1,7 +1,4 @@
-﻿using Models.Soils.Arbitrator;
-using System.Collections.Generic;
-
-namespace Models.PMF.Interfaces
+﻿namespace Models.PMF.Interfaces
 {
     /// <summary>
     /// Root interface
@@ -10,6 +7,12 @@ namespace Models.PMF.Interfaces
     {
         /// <summary>Root length density.</summary>
         double[] LengthDensity { get; }
+
+        /// <summary>Daily soil water uptake from each soil layer.</summary>
+        double[] SWUptakeLayered { get; }
+
+        /// <summary>Daily nitrogen uptake from each soil layer.</summary>
+        double[] NUptakeLayered { get; }
 
         /// <summary>Root length density modifier due to damage.</summary>
         double RootLengthDensityModifierDueToDamage { get; set; }

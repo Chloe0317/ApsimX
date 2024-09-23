@@ -1,19 +1,22 @@
-﻿namespace UserInterface.Presenters
-{
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Drawing;
-    using EventArguments;
-    using System.Linq;
-    using APSIM.Shared.Utilities;
-    using Interfaces;
-    using Models.Core;
-    using Models;
-    using Views;
-    using Commands;
-    using Models.Storage;
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Drawing;
+using UserInterface.EventArguments;
+using System.Linq;
+using APSIM.Shared.Utilities;
+using UserInterface.Interfaces;
+using Models.Core;
+using Models;
+using UserInterface.Views;
+using UserInterface.Commands;
+using Models.Storage;
+using APSIM.Shared.Graphing;
+using Series = Models.Series;
+using Configuration = Utility.Configuration;
 
+namespace UserInterface.Presenters
+{
     /// <summary>
     /// A presenter class for graph series.
     /// </summary>
@@ -45,6 +48,8 @@
         /// <param name="explorerPresenter">The parent explorer presenter</param>
         public void Attach(object model, object view, ExplorerPresenter explorerPresenter)
         {
+            explorerPresenter.MainPresenter.ClearStatusPanel();
+
             this.series = model as Series;
             this.seriesView = view as SeriesView;
             this.explorerPresenter = explorerPresenter;
@@ -216,6 +221,7 @@
 
             // This doesn't quite work yet. If the previous series was a scatter plot, there is no x2, y2 to work with
             // and things go a bit awry.
+            // this function is now called in disableUnusedControls if this needs to be added back later
             // this.seriesView.ShowX2Y2(series.Type == SeriesType.Area);
 
             // If the series is a box plot, then we want to disable certain unused controls
@@ -291,8 +297,8 @@
         /// <param name="e">Event arguments</param>
         private void OnLineThicknessChanged(object sender, EventArgs e)
         {
-            LineThicknessType lineThickness;
-            if (Enum.TryParse<LineThicknessType>(this.seriesView.LineThickness.SelectedValue, out lineThickness))
+            LineThickness lineThickness;
+            if (Enum.TryParse<LineThickness>(this.seriesView.LineThickness.SelectedValue, out lineThickness))
             {
                 this.SetModelProperty("LineThickness", lineThickness);
             }
@@ -303,8 +309,8 @@
         /// <param name="e">Event arguments</param>
         private void OnMarkerSizeChanged(object sender, EventArgs e)
         {
-            MarkerSizeType markerSize;
-            if (Enum.TryParse<MarkerSizeType>(this.seriesView.MarkerSize.SelectedValue, out markerSize))
+            MarkerSize markerSize;
+            if (Enum.TryParse<MarkerSize>(this.seriesView.MarkerSize.SelectedValue, out markerSize))
             {
                 this.SetModelProperty("MarkerSize", markerSize);
             }
@@ -346,10 +352,10 @@
         /// <param name="e">Event arguments</param>
         private void OnXOnTopChanged(object sender, EventArgs e)
         {
-            Axis.AxisType axisType = Axis.AxisType.Bottom;
+            AxisPosition axisType = AxisPosition.Bottom;
             if (this.seriesView.XOnTop.Checked)
             {
-                axisType = Axis.AxisType.Top;
+                axisType = AxisPosition.Top;
             }
 
             this.SetModelProperty("XAxis", axisType);
@@ -360,10 +366,10 @@
         /// <param name="e">Event arguments</param>
         private void OnYOnRightChanged(object sender, EventArgs e)
         {
-            Axis.AxisType axisType = Axis.AxisType.Left;
+            AxisPosition axisType = AxisPosition.Left;
             if (this.seriesView.YOnRight.Checked)
             {
-                axisType = Axis.AxisType.Right;
+                axisType = AxisPosition.Right;
             }
 
             this.SetModelProperty("YAxis", axisType);
@@ -426,7 +432,7 @@
             {
                 this.SetModelProperty("TableName", this.seriesView.DataSource.SelectedValue);
                 List<string> warnings = PopulateFieldNames();
-                if (warnings != null && warnings.Count > 0)
+                if (warnings != null && warnings.Count > 0 && Configuration.Settings.EnableGraphDebuggingMessages)
                 {
                     explorerPresenter.MainPresenter.ClearStatusPanel();
                     explorerPresenter.MainPresenter.ShowMessage(warnings, Simulation.MessageType.Warning);
@@ -488,7 +494,7 @@
             warnings.AddRange(PopulateColourDropDown());
 
             // Populate line thickness drop down.
-            List<string> thicknesses = new List<string>(Enum.GetNames(typeof(LineThicknessType)));
+            List<string> thicknesses = new List<string>(Enum.GetNames(typeof(LineThickness)));
             if (!thicknesses.Contains(series.LineThickness.ToString()) && !string.IsNullOrEmpty(series.LineThickness.ToString()))
             {
                 // This should never happen...if one of these values is ever removed, a converter should be written.
@@ -499,7 +505,7 @@
             this.seriesView.LineThickness.SelectedValue = series.LineThickness.ToString();
 
             // Populate marker size drop down.
-            List<string> sizes = new List<string>(Enum.GetNames(typeof(MarkerSizeType)));
+            List<string> sizes = new List<string>(Enum.GetNames(typeof(MarkerSize)));
             if (!sizes.Contains(series.MarkerSize.ToString()) && !string.IsNullOrEmpty(series.MarkerSize.ToString()))
             {
                 // This should never happen...if one of these values is ever removed, a converter should be written.
@@ -521,8 +527,8 @@
             this.seriesView.SeriesType.SelectedValue = series.Type.ToString();
 
             // Populate checkboxes.
-            this.seriesView.XOnTop.Checked = series.XAxis == Axis.AxisType.Top;
-            this.seriesView.YOnRight.Checked = series.YAxis == Axis.AxisType.Right;
+            this.seriesView.XOnTop.Checked = series.XAxis == AxisPosition.Top;
+            this.seriesView.YOnRight.Checked = series.YAxis == AxisPosition.Right;
             this.seriesView.ShowInLegend.Checked = series.ShowInLegend;
             this.seriesView.IncludeSeriesNameInLegend.Checked = series.IncludeSeriesNameInLegend;
             this.seriesView.XCumulative.Checked = series.CumulativeX;
@@ -539,18 +545,18 @@
             this.seriesView.DataSource.Values = dataSources.ToArray();
             this.seriesView.DataSource.SelectedValue = series.TableName;
 
+            //Show/Hide controls that are not relevant for the current graph type
+            //Needs to run before we populate the fields, so we don't try to populate
+            //fields with no values
+            DisableUnusedControls();
+
             // Populate field name drop downs.
             warnings.AddRange(PopulateFieldNames());
 
             // Populate filter textbox.
             this.seriesView.Filter.Text = series.Filter;
 
-            this.seriesView.ShowX2Y2(series.Type == SeriesType.Region);
-
-            DisableUnusedControls();
-
-            explorerPresenter.MainPresenter.ClearStatusPanel();
-            if (warnings != null && warnings.Count > 0)
+            if (warnings != null && warnings.Count > 0 && Configuration.Settings.EnableGraphDebuggingMessages)
                 explorerPresenter.MainPresenter.ShowMessage(warnings, Simulation.MessageType.Warning);
         }
 
@@ -563,6 +569,18 @@
             seriesView.MarkerType.IsSensitive = !isBoxPlot;
             seriesView.XCumulative.IsSensitive = !isBoxPlot;
             seriesView.XOnTop.IsSensitive = !isBoxPlot;
+
+            //show X2 and Y2 if this is a region graph, hide if not
+            if (series.Type == SeriesType.Region)
+            {
+                this.seriesView.ShowX2Y2(true);
+            } else
+            {
+                this.seriesView.ShowX2Y2(false);
+                //null the x2 and y2 field names so they don't cause errors if a model changes
+                series.X2FieldName = null;
+                series.Y2FieldName = null;
+            }
         }
 
         /// <summary>Populate the line drop down.</summary>

@@ -12,7 +12,7 @@ namespace UnitTests.Functions
     class TrackerFunctionTests
     {
         [Serializable]
-        class ValuesFunction : IFunction
+        class ValuesFunction : Model, IFunction
         {
             private double[] valuesToReturn;
             private int i = 0;
@@ -45,7 +45,7 @@ namespace UnitTests.Functions
             Utilities.CallEvent(tracker, "DoDailyTracking", null);
             Utilities.CallEvent(tracker, "DoDailyTracking", null);
 
-            Assert.AreEqual(tracker.Value(), 20);
+            Assert.That(tracker.Value(), Is.EqualTo(20));
 
             Utilities.CallEvent(tracker, "EndEvent", null);
 

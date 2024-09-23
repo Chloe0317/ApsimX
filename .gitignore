@@ -53,3 +53,13 @@ NetCoreBin/
 Docs/docfx/api/*.yml
 Docs/docfx/api/.manifest
 Docs/apsimx-docs/
+Prototypes/Pinus/Pinus.pdf
+ActivitiesPerformedSummary.html
+LabourAllocationSummary.html
+CurrentDescriptiveSummary.html
+/Docs/.hugo_build.lock
+Tools/TestSuiteScrapper/Properties/launchSettings.json
+launchSettings.json
+/testEnvironments.json
+.mono
+ApsimX.xml

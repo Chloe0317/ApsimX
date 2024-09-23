@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using APSIM.Shared.Documentation;
 using Models.Core;
 using Models.Interfaces;
 
@@ -18,15 +19,14 @@ namespace Models.Functions.SupplyFunctions
     /// 
     /// For C4 plants,
     /// 
-    ///     _F<sub>CO~2~</sub> = 0.000143 * CO~2~ + 0.95_
+    ///     _F~CO2~ = 0.000143 * CO~2~ + 0.95_
     /// 
     /// </summary>
     [Serializable]
-    [Description("This model calculates CO2 Impact on RUE using the approach of <br>Reyenga, Howden, Meinke, Mckeon (1999) <br>Modelling global change impact on wheat cropping in south-east Queensland, Australia. <br>Enivironmental Modelling && Software 14:297-306")]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(IFunction))]
-    public class RUECO2Function : Model, IFunction, ICustomDocumentation
+    public class RUECO2Function : Model, IFunction
     {
         /// <summary>The photosynthetic pathway</summary>
         [Description("PhotosyntheticPathway")]
@@ -53,23 +53,18 @@ namespace Models.Functions.SupplyFunctions
             {
 
                 double temp = (MetData.MaxT + MetData.MinT) / 2.0; // Average temperature
+                double CP = (163.0 - temp) / (5.0 - 0.1 * temp);
 
-
-                if (temp >= 50.0)
+                if (temp >= 46.5)
                     throw new Exception("Average daily temperature too high for RUE CO2 Function");
-
-                if (MetData.CO2 < 300)
-                    throw new Exception("CO2 concentration too low for RUE CO2 Function");
+                if (MetData.CO2 <= CP)
+                    throw new Exception("Daily C02 concentrations are below compensation point");
                 else if (MetData.CO2 == 350)
                     return 1.0;
                 else
                 {
-                    double CP;      //co2 compensation point (ppm)
                     double first;
                     double second;
-
-                    CP = (163.0 - temp) / (5.0 - 0.1 * temp);
-
                     first = (MetData.CO2 - CP) * (350.0 + 2.0 * CP);
                     second = (MetData.CO2 + 2.0 * CP) * (350.0 - CP);
                     return first / second;
@@ -83,28 +78,15 @@ namespace Models.Functions.SupplyFunctions
                 throw new Exception("Unknown photosynthetic pathway in RUECO2Function");
         }
 
-        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
-        /// <param name="tags">The list of tags to add to.</param>
-        /// <param name="headingLevel">The level (e.g. H2) of the headings.</param>
-        /// <param name="indent">The level of indentation 1, 2, 3 etc.</param>
-        public void Document(List<AutoDocumentation.ITag> tags, int headingLevel, int indent)
+        /// <summary>Document the model.</summary>
+        public override IEnumerable<ITag> Document()
         {
-            if (IncludeInDocumentation)
-            {
-                // add a heading
-                tags.Add(new AutoDocumentation.Heading(Name, headingLevel));
+            // Write description of this class from summary and remarks XML documentation.
+            foreach (var tag in GetModelDescription())
+                yield return tag;
 
-                // get description of this class
-                AutoDocumentation.DocumentModelSummary(this, tags, headingLevel, indent, false);
-
-                // write memos
-                foreach (IModel memo in this.FindAllChildren<Memo>())
-                    AutoDocumentation.DocumentModel(memo, tags, headingLevel + 1, indent);
-
-                // write children.
-                foreach (IModel child in this.FindAllChildren<IFunction>())
-                    AutoDocumentation.DocumentModel(child, tags, headingLevel + 1, indent);
-            }
+            foreach (var tag in DocumentChildren<IModel>())
+                yield return tag;
         }
     }
 }

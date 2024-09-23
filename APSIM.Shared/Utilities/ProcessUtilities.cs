@@ -75,6 +75,18 @@ namespace APSIM.Shared.Utilities
                 if (System.IO.Path.VolumeSeparatorChar == '/' && data[0] == 0x7f && data[1] == 'E' && data[2] == 'L' && data[3] == 'F')
                     return CompilationMode.Native;
 
+                if (ProcessUtilities.CurrentOS.IsMac)
+                {
+                    // Check if file is a MACH-O binary.
+                    const uint magic32Bit = 0x_FE_ED_FA_CE;
+                    const uint magic64Bit = 0x_FE_ED_FA_CF;
+                    const uint magic32BitReverseEndian = 0x_CE_FA_ED_FE;
+                    const uint magic64BitReverseEndian = 0x_CF_FA_ED_FE;
+                    uint magic = UInt32FromBytes(data, 0);
+                    if (magic == magic32Bit || magic == magic64Bit || magic == magic32BitReverseEndian || magic == magic64BitReverseEndian)
+                        return CompilationMode.Native;
+                }
+
                 // Verify this is a executable/dll
                 if (UInt16FromBytes(data, 0) != 0x5a4d)
                     return CompilationMode.Invalid;
@@ -151,7 +163,7 @@ namespace APSIM.Shared.Utilities
             else
             {
                 if (System.IO.File.Exists(path))
-                    System.Diagnostics.Process.Start(path);
+                    System.Diagnostics.Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
                 else if (System.IO.Directory.Exists(path))
                 {
                     if (path.Contains(" ") && path[0] != '\"')
@@ -160,7 +172,14 @@ namespace APSIM.Shared.Utilities
                     System.Diagnostics.Process.Start("explorer.exe", path);
                 }
                 else
-                    System.Diagnostics.Process.Start(path);
+                {
+                    var ps = new System.Diagnostics.ProcessStartInfo(path)
+                    {
+                        UseShellExecute = true,
+                        Verb = "open"
+                    };
+                    System.Diagnostics.Process.Start(ps);
+                }
             }
         }
 

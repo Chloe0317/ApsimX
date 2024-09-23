@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using APSIM.Shared.Utilities;
 using Models.PMF.Interfaces;
 
@@ -193,17 +191,16 @@ namespace Models.PMF
 
             for (int i = 0; i < suppliesForEachOrgan.Length; i++)
             {
-                ReallocationSupply[i] = suppliesForEachOrgan[i].Reallocation;
+                ReallocationSupply[i] = suppliesForEachOrgan[i].ReAllocation;
                 UptakeSupply[i] = suppliesForEachOrgan[i].Uptake;
                 FixationSupply[i] = suppliesForEachOrgan[i].Fixation;
-                RetranslocationSupply[i] = suppliesForEachOrgan[i].Retranslocation;
+                RetranslocationSupply[i] = suppliesForEachOrgan[i].ReTranslocation;
             }
         }
 
         /// <summary>Setup all demands</summary>
         /// <param name="demandsForEachOrgan">The organs demands</param>
-        /// <param name="prioritiesForEachOrgan">the priority q factors</param>
-        public void GetDemands(BiomassPoolType[] demandsForEachOrgan, BiomassPoolType[] prioritiesForEachOrgan = null)
+        public void GetDemands(BiomassPoolType[] demandsForEachOrgan)
         {
 
             for (int i = 0; i < demandsForEachOrgan.Length; i++)
@@ -224,12 +221,9 @@ namespace Models.PMF
                 StructuralAllocation[i] = 0;
                 MetabolicAllocation[i] = 0;
                 StorageAllocation[i] = 0;
-                if (prioritiesForEachOrgan != null)
-                {
-                    QStructural[i] = prioritiesForEachOrgan[i].Structural;
-                    QMetabolic[i] = prioritiesForEachOrgan[i].Metabolic;
-                    QStorage[i] = prioritiesForEachOrgan[i].Storage;
-                }
+                QStructural[i] = demandsForEachOrgan[i].QStructuralPriority;
+                QMetabolic[i] = demandsForEachOrgan[i].QMetabolicPriority;
+                QStorage[i] = demandsForEachOrgan[i].QStoragePriority;
             }
 
             Allocated = 0;
@@ -238,7 +232,7 @@ namespace Models.PMF
         }
 
 
-        
+
 
         /// <summary>Clear the arbitration type</summary>
         public void Clear()

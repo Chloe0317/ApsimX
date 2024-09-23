@@ -1,28 +1,19 @@
-﻿namespace UserInterface.Views
+﻿using System;
+using System.Linq;
+using Gtk;
+using Utility;
+using MessageType = Models.Core.MessageType;
+
+namespace UserInterface.Views
 {
-    using Interfaces;
-    using Gtk;
-    using System;
-    using Extensions;
-    using System.Collections.Generic;
-    using System.Linq;
-    using Utility;
 
     /// <summary>A view for a summary file.</summary>
     public class SummaryView : ViewBase, ISummaryView
     {
-        private HBox topBox;
-        private HBox middleBox;
-        private VBox mainControl;
-
-        /// <summary>Summary messages checkbox</summary>
-        public CheckBoxView SummaryCheckBox { get; private set; }
-
-        /// <summary>Warning messages checkbox</summary>
-        public CheckBoxView WarningCheckBox { get; private set; }
-
-        /// <summary>Warning messages checkbox</summary>
-        public CheckBoxView ErrorCheckBox { get; private set; }
+        private Widget captureRules;
+        private Widget simulationFilter;
+        private Box mainControl;
+        private Box settingsControl;
 
         /// <summary>Drop down box which displays the simulation names.</summary>
         public DropDownView SimulationDropDown { get; private set; }
@@ -32,42 +23,69 @@
 
         private Button btnJumpToSimLog;
 
+        public EnumDropDownView<Models.Core.MessageType> VerbosityDropDown { get; private set; }
+
         /// <summary>Initializes a new instance of the <see cref="SummaryView"/> class.</summary>
         public SummaryView(ViewBase owner) : base(owner)
         {
-            topBox = new HBox();
-            SummaryCheckBox = new CheckBoxView(this);
-            SummaryCheckBox.TextOfLabel = "Capture summary?";
-            WarningCheckBox = new CheckBoxView(this);
-            WarningCheckBox.TextOfLabel = "Capture warning messages?";
-            ErrorCheckBox = new CheckBoxView(this);
-            ErrorCheckBox.TextOfLabel = "Capture error messages?";
-            topBox.PackStart(SummaryCheckBox.MainWidget, false, false, 10);
-            topBox.PackStart(WarningCheckBox.MainWidget, false, false, 10);
-            topBox.PackStart(ErrorCheckBox.MainWidget, false, false, 10);
+            captureRules = CreateCaptureRules();
+            simulationFilter = CreateSimulationFilter();
 
-            middleBox = new HBox();
-            SimulationDropDown = new DropDownView(this);
-            middleBox.PackStart(new Label("Simulation:"), false, false, 10);
-            middleBox.PackStart(SimulationDropDown.MainWidget, true, true, 10);
+            Widget jumpToLogContainer = CreateJumpToLogContainer();
 
-            btnJumpToSimLog = new Button("Jump to simulation log");
-            HBox buttonContainer = new HBox();
-            buttonContainer.PackStart(btnJumpToSimLog, false, false, 0);
-            btnJumpToSimLog.Clicked += OnJumpToSimulationLog;
-
-            mainControl = new VBox();
+            mainControl = new Box(Orientation.Vertical, 0);
+            settingsControl = new Box(Orientation.Horizontal, 0);
             mainWidget = mainControl;
-            mainControl.PackStart(topBox, false, false, 0);
-            mainControl.PackStart(middleBox, false, false, 0);
-            mainControl.PackStart(buttonContainer, false, false, 0);
+            settingsControl.PackStart(captureRules, false, false, 0);
+            settingsControl.PackStart(simulationFilter, false, false, 0);
             SummaryDisplay = new MarkdownView(this);
             ScrolledWindow scroller = new ScrolledWindow();
             scroller.Add(((ViewBase)SummaryDisplay).MainWidget);
+            mainControl.PackStart(settingsControl, false, false, 0);
+            mainControl.PackStart(jumpToLogContainer, false, false, 0);
             mainControl.PackEnd(scroller, true, true, 0);
-
+            VerbosityDropDown.Changed += OnVerbosityDropDownChange;
             mainWidget.Destroyed += MainWidgetDestroyed;
             mainWidget.ShowAll();
+        }
+
+        private Widget CreateJumpToLogContainer()
+        {
+            btnJumpToSimLog = new Button("Jump to simulation log");
+            btnJumpToSimLog.Clicked += OnJumpToSimulationLog;
+            Box box = new Box(Orientation.Horizontal, 0);
+            box.PackStart(btnJumpToSimLog, false, false, 0);
+            box.Margin = 5;
+            return box;
+        }
+
+        private Widget CreateSimulationFilter()
+        {
+            Box box = new Box(Orientation.Vertical, 0);
+            Box hBox = new Box(Orientation.Horizontal, 0);
+            SimulationDropDown = new DropDownView(this);
+            hBox.PackStart(new Label("Simulation:"), false, false, 5);
+            hBox.PackStart(SimulationDropDown.MainWidget, false, false, 5);
+            box.PackStart(hBox, false, false, 5);
+            box.MarginBottom = 5;
+            Frame frame = new Frame("Simulation Filter");
+            frame.Add(box);
+            frame.Margin = 5;
+            return frame;
+        }
+
+        private Widget CreateCaptureRules()
+        {
+            VerbosityDropDown = new EnumDropDownView<MessageType>(this);
+            Label verbosity = new Label("Messages which should be saved when the simulation is run:");
+            Box box = new Box(Orientation.Vertical, 0);
+            box.PackStart(verbosity, false, false, 5);
+            box.PackStart(VerbosityDropDown.MainWidget, false, false, 5);
+            box.Margin = 5;
+            Frame frame = new Frame("Capture Rules");
+            frame.Add(box);
+            frame.Margin = 5;
+            return frame;
         }
 
         private void OnJumpToSimulationLog(object sender, EventArgs e)
@@ -87,6 +105,20 @@
             }
         }
 
+        private void OnVerbosityDropDownChange(object sender, EventArgs args)
+        {
+            try
+            {
+                if (VerbosityDropDown.SelectedEnumValue >= MessageType.Information)
+                    btnJumpToSimLog.Visible = true;
+                else btnJumpToSimLog.Visible = false;
+            }
+            catch (Exception err)
+            {
+                ShowError(err);
+            }
+        }
+
         /// <summary>Main widget destroyed handler</summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
@@ -95,14 +127,12 @@
             try
             {
                 btnJumpToSimLog.Clicked -= OnJumpToSimulationLog;
-                topBox.Cleanup();
-                SummaryCheckBox.MainWidget.Cleanup();
-                WarningCheckBox.MainWidget.Cleanup();
-                ErrorCheckBox.MainWidget.Cleanup();
-                middleBox.Cleanup();
-                SimulationDropDown.MainWidget.Cleanup();
-                mainControl.Cleanup();
-                ((ViewBase)SummaryDisplay).MainWidget.Cleanup();
+                captureRules.Dispose();
+                VerbosityDropDown.Dispose();
+                simulationFilter.Dispose();
+                SimulationDropDown.Dispose();
+                mainControl.Dispose();
+                ((ViewBase)SummaryDisplay).Dispose();
                 mainWidget.Destroyed -= MainWidgetDestroyed;
                 owner = null;
             }

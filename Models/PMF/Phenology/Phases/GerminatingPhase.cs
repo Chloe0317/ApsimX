@@ -1,23 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
-using Models.Core;
-using Newtonsoft.Json;
-using System.IO;
-using Models.Soils;
-using Models.Functions;
+using APSIM.Shared.Documentation;
 using APSIM.Shared.Utilities;
+using Models.Core;
+using Models.Functions;
 using Models.Interfaces;
+using Models.Soils;
+using Newtonsoft.Json;
 
 namespace Models.PMF.Phen
 {
     /// <summary>
-    /// # [Name] Phase
-    /// The [Name] phase goes from [Start] stage to [End] stage and assumes
-    /// germination [End] will be reached on the day after sowing or the first day 
+    /// This phase goes from a start stage to an end stage and assumes
+    /// germination will be reached on the day after sowing or the first day
     /// thereafter when the extractable soil water at sowing depth is greater than zero."
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(Phenology))]
     public class GerminatingPhase : Model, IPhase
@@ -39,11 +38,17 @@ namespace Models.PMF.Phen
         private Phenology phenology = null;
 
         [Link]
-        private Clock clock = null;
+        private IClock clock = null;
+
+        [Link]
+        private ISoilTemperature soilTemperature = null;
+
+        [Link(Type = LinkType.Child, ByName = true)]
+        private IFunction minSoilTemperature = null;
 
         // 2. Private and protected fields
         //-----------------------------------------------------------------------------------------------------------------
-        
+
         /// <summary>The soil layer in which the seed is sown.</summary>
         private int SowLayer = 0;
 
@@ -62,9 +67,13 @@ namespace Models.PMF.Phen
         [Description("End")]
         public string End { get; set; }
 
+        /// <summary>Is the phase emerged from the ground?</summary>
+        [Description("Is the phase emerged?")]
+        public bool IsEmerged { get; set; } = false;
+
         /// <summary>Fraction of phase that is complete (0-1).</summary>
         [JsonIgnore]
-        public double FractionComplete { get { return 0.999; } }
+        public double FractionComplete { get { return 0; } }
 
         /// <summary>
         /// Date for germination to occur.  null by default so model is used
@@ -80,16 +89,17 @@ namespace Models.PMF.Phen
         public bool DoTimeStep(ref double propOfDayToUse)
         {
             bool proceedToNextPhase = false;
+            double sowLayerTemperature = soilTemperature.Value[SowLayer];
 
             if (GerminationDate != null)
             {
-                if (DateUtilities.DatesEqual(GerminationDate, clock.Today))
+                if (DateUtilities.DayMonthIsEqual(GerminationDate, clock.Today))
                 {
                     doGermination(ref proceedToNextPhase, ref propOfDayToUse);
                 }
             }
 
-            else if (!phenology.OnStartDayOf("Sowing") && waterBalance.SWmm[SowLayer] > soilPhysical.LL15mm[SowLayer])
+            else if (!phenology.OnStartDayOf("Sowing") && waterBalance.SWmm[SowLayer] > soilPhysical.LL15mm[SowLayer] && sowLayerTemperature >= minSoilTemperature.Value())
             {
                 doGermination(ref proceedToNextPhase, ref propOfDayToUse);
             }
@@ -116,6 +126,17 @@ namespace Models.PMF.Phen
         private void OnPlantSowing(object sender, SowingParameters data)
         {
             SowLayer = SoilUtilities.LayerIndexOfDepth(soilPhysical.Thickness, plant.SowingData.Depth);
+        }
+
+        /// <summary>Writes documentation for this function by adding to the list of documentation tags.</summary>
+        public override IEnumerable<ITag> Document()
+        {
+            // Write a table containing phase numers and start/end stages.
+            yield return new Paragraph($"The phase goes from {Start.ToLower()} to {End.ToLower()} and assumes {End.ToLower()} will be reached on the day after sowing or the first day thereafter when the extractable soil water at sowing depth is greater than zero.");
+
+            // Write memos.
+            foreach (var tag in DocumentChildren<Memo>())
+                yield return tag;
         }
     }
 }

@@ -1,7 +1,7 @@
-﻿using Models.Core;
-using Models.Functions;
-using System;
+﻿using System;
 using System.Linq;
+using Models.Core;
+using Models.Functions;
 using Newtonsoft.Json;
 
 namespace Models.PMF.Phen
@@ -11,7 +11,7 @@ namespace Models.PMF.Phen
     /// </summary>
     [Serializable]
     [Description("Adds the number of vernalising minus devernalising days between start and end phases")]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(Phenology))]
     public class Vernalisation : Model
@@ -20,10 +20,10 @@ namespace Models.PMF.Phen
         Phenology phenology = null;
 
         [Link(Type = LinkType.Child, ByName = true)]
-        HourlyInterpolation vernalisingDays = null;
+        SubDailyInterpolation vernalisingDays = null;
 
         [Link(Type = LinkType.Child, ByName = true)]
-        HourlyInterpolation DevernalisingDays = null;
+        SubDailyInterpolation DevernalisingDays = null;
 
         [Link(Type = LinkType.Child, ByName = true)]
         Constant DaysToStabilise = null;
@@ -59,7 +59,7 @@ namespace Models.PMF.Phen
         [JsonIgnore]
         public double DaysVernalising { get; set; }
 
- 
+
         /// <summary>Compute the vernalisation</summary>
         public void DoVernalisation()
         {

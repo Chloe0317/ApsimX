@@ -1,46 +1,11 @@
 ﻿using System;
-using System.Text;
-using System.Linq;
-using System.IO;
-using System.Drawing;
 using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
 using Models.Core;
 
 namespace Utility
 {
-    [AttributeUsage(AttributeTargets.Property)]
-    internal class InputAttribute : Attribute
-    {
-        public string Name { get; set; }
-        public string OnChanged { get; set; }
-        public InputAttribute(string name)
-        {
-            Name = name;
-        }
-    }
-
-    internal class FileInput : InputAttribute
-    {
-        /// <summary>
-        /// Recommended file extension.
-        /// </summary>
-        public string[] Extensions { get; set; }
-
-        /// <summary>
-        /// Constructor to provide recommended file extensions.
-        /// </summary>
-        /// <param name="name">Property name.</param>
-        /// <param name="extensions">Recommended file extensions.</param>
-        public FileInput(string name, params string[] extensions) : base(name)
-        {
-            Extensions = extensions;
-        }
-    }
-
-    internal class FontInput : InputAttribute
-    {
-        public FontInput(string name) : base(name) { }
-    }
 
     /// <summary>Stores user settings and other information which is persistent between restarts of the GUI.</summary>
     public class Configuration
@@ -50,6 +15,8 @@ namespace Utility
 
         /// <summary>The configuration file</summary>
         private string configurationFile = null;
+
+        public bool ThemeRestartRequired = false;
 
         /// <summary>The location for the form</summary>
         public Point MainFormLocation { get; set; }
@@ -68,20 +35,31 @@ namespace Utility
         public int FilesInHistory { get; set; }
 
         /// <summary>Position of split screen divider.</summary>
-        /// <remarks>Not sure what units this uses...might be pixels.</remarks>
+        /// <remarks>Percentage 0-100</remarks>
         public int SplitScreenPosition { get; set; }
+
+        /// <summary>Position of split screen divider.</summary>
+        /// <remarks>Percentage 0-100</remarks>
+        public int TreeSplitScreenPosition { get; set; }
 
         /// <summary>The previous folder where a file was opened or saved</summary>
         public string PreviousFolder { get; set; }
 
         /// <summary>The previous height of the status panel</summary>
-        public int StatusPanelHeight { get; set; }
+        /// <remarks>Percentage 0-100</remarks>
+        public double StatusPanelHeight { get; set; }
 
         /// <summary>
         /// The position of the splitter between the variables
         /// and frequency text editors in the report UI.
         /// </summary>
-        public int ReportSplitterPosition { get; set; }
+        public double ReportSplitterPosition { get; set; }
+
+        /// <summary>
+        /// The position of the splitter between the variables/event text editors
+        /// and the common report/event ListViews.
+        /// </summary>
+        public double ReportSplitterVerticalPosition { get; set; }
 
         /// <summary>Keeps track of whether the dark theme is enabled.</summary>
         [Input("Dark theme enabled", OnChanged = nameof(OnDarkThemeToggled))]
@@ -90,15 +68,25 @@ namespace Utility
         /// <summary>Should the file be automatically saved to disk before running simulations?</summary>
         [Input("Autosave on run")]
         [Tooltip("Should the file be automatically saved to disk before running simulations?")]
-        public bool AutoSave { get; set;} = true;
+        public bool AutoSave { get; set; } = true;
 
-        /// <summary>Iff true, the GUI will not play a sound when simulations finish running.</summary>
+        /// <summary>If true, the GUI will not play a sound when simulations finish running.</summary>
         [Input("Mute all sound effects")]
-        public bool Muted { get; set; }
+        public bool Muted { get; set; } = true;
 
-        /// <summary>Use the new property presenter?</summary>
-        [Input("Use new/beta property presenter")]
-        public bool UseNewPropertyPresenter { get; set; }
+        /// <summary>
+        /// In theory, if there are any commands in the command history,
+        /// then the file has been modified. In practice, there may be
+        /// some faulty presenters which make changes to the model without
+        /// using the command history.
+        /// </summary>
+        [Input("Use faster file closing algorithm")]
+        [Tooltip("This will mostly eliminate the pause when closing a file, but it may cause apsim to fail to prompt to save the file in some cases.")]
+        public bool UseFastFileClose { get; set; }
+
+        [Input("Enable graph debugging output")]
+        [Tooltip("Outputs messages in the status bar if data is missing, is outside axis bounds or is NaN. Useful for debugging Observed/Predicted graphs.")]
+        public bool EnableGraphDebuggingMessages { get; set; } = false;
 
         /// <summary>Return the name of the summary file JPG.</summary>
         public string SummaryPngFileName
@@ -111,8 +99,8 @@ namespace Utility
                 {
                     try
                     {
-                        Bitmap b = ApsimNG.Properties.Resources.ResourceManager.GetObject("ApsimSummary") as Bitmap;
-                        b.Save(summaryJpg);
+                        Gdk.Pixbuf b = Gdk.Pixbuf.LoadFromResource("Apsim1.png");
+                        b.Save(summaryJpg, "jpeg");
                     }
                     catch
                     {
@@ -301,7 +289,14 @@ namespace Utility
         /// <summary>Finalizes an instance of the <see cref="Configuration"/> class.</summary>
         ~Configuration()
         {
-            Save();
+            try
+            {
+                Save();
+            }
+            catch
+            {
+                // An uncaught exception could crash APSIM from the GC thread.
+            }
         }
 
         /// <summary>Gets the configuration settings.</summary>
@@ -372,16 +367,17 @@ namespace Utility
             xmlwriter.Serialize(filewriter, Settings);
             filewriter.Close();
         }
-    
+
         /// <summary>
         /// This will be called whenever the 'dark mode' option is toggled.
         /// It will change the default editor style to something.
         /// </summary>
         private void OnDarkThemeToggled()
         {
-#if NETCOREAPP
+
             EditorStyleName = DarkTheme ? "Adwaita-dark" : "Adwaita";
-#endif
+            ThemeRestartRequired = !ThemeRestartRequired;
+
         }
     }
 }

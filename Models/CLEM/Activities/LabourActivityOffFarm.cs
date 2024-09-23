@@ -1,14 +1,12 @@
-﻿using Models.Core;
-using Models.CLEM.Groupings;
+using Models.Core;
 using Models.CLEM.Resources;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using Newtonsoft.Json;
 using Models.Core.Attributes;
 using System.IO;
+using Models.CLEM.Interfaces;
 
 namespace Models.CLEM.Activities
 {
@@ -16,26 +14,42 @@ namespace Models.CLEM.Activities
     /// Off farm labour activities
     /// </summary>
     [Serializable]
-    [ViewName("UserInterface.Views.GridView")]
+    [ViewName("UserInterface.Views.PropertyView")]
     [PresenterName("UserInterface.Presenters.PropertyPresenter")]
     [ValidParent(ParentType = typeof(CLEMActivityBase))]
     [ValidParent(ParentType = typeof(ActivitiesHolder))]
     [ValidParent(ParentType = typeof(ActivityFolder))]
-    [Description("This activity manages labour supplied and income derived from an off-farm task.")]
+    [Description("Manages labour supplied and income derived from an off-farm task")]
     [HelpUri(@"Content/Features/Activities/Labour/OffFarmWork.htm")]
-    [Version(1, 0, 2, "Labour required and pricing  now implement in LabourRequirement component and LabourPricing from Resources used.")]
+    [Version(1, 0, 2, "Labour required and pricing now implement in LabourRequirement component and LabourPricing from Resources used.")]
     [Version(1, 0, 1, "")]
-    public class LabourActivityOffFarm: CLEMActivityBase, IValidatableObject
+    public class LabourActivityOffFarm: CLEMActivityBase, IValidatableObject, IHandlesActivityCompanionModels
     {
         private FinanceType bankType { get; set; }
-        private LabourRequirement labourRequired { get; set; }
 
         /// <summary>
         /// Bank account name to pay to
         /// </summary>
         [Description("Bank account to pay to")]
-        [Models.Core.Display(Type = DisplayType.CLEMResource, CLEMResourceGroups = new Type[] { typeof(Finance) })]
+        [Core.Display(Type = DisplayType.DropDown, Values = "GetResourcesAvailableByName", ValuesArgs = new object[] { new object[] { typeof(Finance) } })]
         public string BankAccountName { get; set; }
+
+        /// <inheritdoc/>
+        public override LabelsForCompanionModels DefineCompanionModelLabels(string type)
+        {
+            switch (type)
+            {
+                case "LabourRequirement":
+                    return new LabelsForCompanionModels(
+                        identifiers: new List<string>(),
+                        measures: new List<string>() {
+                            "fixed",
+                        }
+                        );
+                default:
+                    return new LabelsForCompanionModels();
+            }
+        }
 
         /// <summary>An event handler to allow us to initialise ourselves.</summary>
         /// <param name="sender">The sender.</param>
@@ -43,93 +57,37 @@ namespace Models.CLEM.Activities
         [EventSubscribe("CLEMInitialiseActivity")]
         private void OnCLEMInitialiseActivity(object sender, EventArgs e)
         {
-            // locate resources
-            bankType = Resources.GetResourceItem(this, BankAccountName, OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore) as FinanceType;
-            labourRequired = this.FindAllChildren<LabourRequirement>().FirstOrDefault() as LabourRequirement;
+            bankType = Resources.FindResourceType<Finance, FinanceType>(this, BankAccountName, OnMissingResourceActionTypes.Ignore, OnMissingResourceActionTypes.Ignore);
         }
 
-        /// <summary>
-        /// Determines how much labour is required from this activity based on the requirement provided
-        /// </summary>
-        /// <param name="requirement">The details of how labour are to be provided</param>
-        /// <returns></returns>
-        public override GetDaysLabourRequiredReturnArgs GetDaysLabourRequired(LabourRequirement requirement)
+        /// <inheritdoc/>
+        public override List<ResourceRequest> RequestResourcesForTimestep(double argument = 0)
         {
-            double daysNeeded = 0;
-            // get fixed days per LabourRequirement
-            if(labourRequired != null)
+            // provide updated measure for companion models
+            foreach (var valueToSupply in valuesForCompanionModels)
             {
-                daysNeeded = labourRequired.LabourPerUnit;
+                switch (valueToSupply.Key.unit)
+                {
+                    case "fixed":
+                        valuesForCompanionModels[valueToSupply.Key] = 1;
+                        break;
+                    default:
+                        throw new NotImplementedException(UnknownUnitsErrorText(this, valueToSupply.Key));
+                }
             }
-            return new GetDaysLabourRequiredReturnArgs(daysNeeded, "Off-farm", null);
-
-        }
-
-        /// <summary>
-        /// Method to determine resources required for this activity in the current month
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForActivity()
-        {
             return null;
         }
 
-        /// <summary>
-        /// Method used to perform activity if it can occur as soon as resources are available.
-        /// </summary>
-        public override void DoActivity()
+        /// <inheritdoc/>
+        public override void PerformTasksForTimestep(double argument = 0)
         {
             // days provided from labour set in the requests in the resourceResquestList
             // receive payment for labour if bank type exists
             if (bankType != null)
             {
-                bankType.Add(ResourceRequestList.Sum(a => a.Value), this, "", "Off farm labour");
+                bankType.Add(ResourceRequestList.Sum(a => a.Value), this, null, TransactionCategory);
+                SetStatusSuccessOrPartial(ResourceRequestList.Where(a => a.ActivityModel is LabourRequirement).Where(a => a.Available < a.Provided).Any());
             }
-        }
-
-        /// <summary>
-        /// The method allows the activity to adjust resources requested based on shortfalls (e.g. labour) before they are taken from the pools
-        /// </summary>
-        public override void AdjustResourcesNeededForActivity()
-        {
-            return;
-        }
-
-        /// <summary>
-        /// Method to determine resources required for initialisation of this activity
-        /// </summary>
-        /// <returns></returns>
-        public override List<ResourceRequest> GetResourcesNeededForinitialisation()
-        {
-            return null;
-        }
-
-        /// <summary>
-        /// Resource shortfall event handler
-        /// </summary>
-        public override event EventHandler ResourceShortfallOccurred;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnShortfallOccurred(EventArgs e)
-        {
-            ResourceShortfallOccurred?.Invoke(this, e);
-        }
-
-        /// <summary>
-        /// Resource shortfall occured event handler
-        /// </summary>
-        public override event EventHandler ActivityPerformed;
-
-        /// <summary>
-        /// Shortfall occurred 
-        /// </summary>
-        /// <param name="e"></param>
-        protected override void OnActivityPerformed(EventArgs e)
-        {
-            ActivityPerformed?.Invoke(this, e);
         }
 
         #region validation
@@ -141,61 +99,39 @@ namespace Models.CLEM.Activities
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {
             var results = new List<ValidationResult>();
-            if (bankType == null && Resources.GetResourceGroupByType(typeof(Finance)) != null)
-            {
-                Summary.WriteWarning(this, "No bank account has been specified for [a=" + this.Name + "]. No funds will be earned!");
-            }
+            if (bankType == null && Resources.FindResource<Finance>() != null)
+                Summary.WriteMessage(this, "No bank account has been specified for [a=" + this.Name + "]. No funds will be earned!", MessageType.Warning);
 
+            var labour = FindAllChildren<LabourRequirement>();
             // get check labour required
-            if (labourRequired == null)
+            if (labour == null)
             {
                 string[] memberNames = new string[] { "Labour requirement" };
                 results.Add(new ValidationResult(String.Format("[a={0}] requires a [r=LabourRequirement] component to set the labour needed.\r\nThis activity will be ignored without this component.", this.Name), memberNames));
             }
-            else
-            {
-                // check labour required is using fixed type
-                if (labourRequired.UnitType != LabourUnitType.Fixed)
-                {
-                    string[] memberNames = new string[] { "Labour requirement" };
-                    results.Add(new ValidationResult(String.Format("The UnitType of the [r=LabourRequirement] in [a={0}] must be [Fixed] for this activity.", this.Name), memberNames));
-                }
-            }
 
             // check pricing
-            if (!Resources.Labour().PricingAvailable)
+            if (!Resources.FindResourceGroup<Labour>().PricingAvailable)
             {
                 string[] memberNames = new string[] { "Labour pricing" };
                 results.Add(new ValidationResult(String.Format("[a={0}] requires a [r=LabourPricing] component to set the labour rates.\r\nThis activity will be ignored without this component.", this.Name), memberNames));
             }
             return results;
-        } 
+        }
         #endregion
 
         #region descriptive summary
 
-        /// <summary>
-        /// Provides the description of the model settings for summary (GetFullSummary)
-        /// </summary>
-        /// <param name="formatForParentControl">Use full verbose description</param>
-        /// <returns></returns>
-        public override string ModelSummary(bool formatForParentControl)
+        /// <inheritdoc/>
+        public override string ModelSummary()
         {
             using (StringWriter htmlWriter = new StringWriter())
             {
                 htmlWriter.Write("\r\n<div class=\"activityentry\">Earn ");
                 htmlWriter.Write("Earnings will be paid to ");
-                if (BankAccountName == null || BankAccountName == "")
-                {
-                    htmlWriter.Write("<span class=\"errorlink\">[ACCOUNT NOT SET]</span>");
-                }
-                else
-                {
-                    htmlWriter.Write("<span class=\"resourcelink\">" + BankAccountName + "</span>");
-                }
+                htmlWriter.Write(CLEMModel.DisplaySummaryValueSnippet(BankAccountName, "Account not set", HTMLSummaryStyle.Resource));
                 htmlWriter.Write(" based on <span class=\"resourcelink\">Labour Pricing</span> set in the <span class=\"resourcelink\">Labour</span>");
                 htmlWriter.Write("</div>");
-
                 return htmlWriter.ToString(); 
             }
         } 

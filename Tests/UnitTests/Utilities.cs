@@ -1,22 +1,23 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using APSIM.Shared.JobRunning;
+using APSIM.Shared.Utilities;
+using Models;
+using Models.Core;
+using Models.Core.ApsimFile;
+using Models.Storage;
+using NUnit.Framework;
+
 namespace UnitTests
 {
-    using APSIM.Shared.JobRunning;
-    using APSIM.Shared.Utilities;
-    using Models;
-    using Models.Core;
-    using Models.Core.ApsimFile;
-    using Models.GrazPlan;
-    using Models.Storage;
-    using NUnit.Framework;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.IO;
-    using System.Reflection;
+
 
     [SetUpFixture]
-    public class Utilities
+    public static class Utilities
     {
         private static string tempPath;
         [OneTimeTearDown]
@@ -61,14 +62,30 @@ namespace UnitTests
         /// <summary>Call an event in a model</summary>
         public static void CallEvent(object model, string eventName, object[] arguments = null)
         {
-            MethodInfo eventToInvoke = model.GetType().GetMethod("On" + eventName, BindingFlags.Instance | BindingFlags.NonPublic);
+            CallMethod(model, "On" + eventName, arguments);
+        }
+
+        /// <summary>Call a private method in a model</summary>
+        public static object CallMethod(object model, string methodName, object[] arguments = null)
+        {
+            object returnValue = null;
+            MethodInfo eventToInvoke = model.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
             if (eventToInvoke != null)
             {
                 if (arguments == null)
                     arguments = new object[] { model, new EventArgs() };
-                eventToInvoke.Invoke(model, arguments);
+                returnValue = eventToInvoke.Invoke(model, arguments);
             }
+            return returnValue;
         }
+
+        /// <summary>Call a private method in a model</summary>
+        public static void SetProperty(object model, string propertyName, object value)
+        {
+            PropertyInfo property = model.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (property != null)
+                property.SetValue(model, value);
+        }        
 
         /// <summary>Call an event in a model and all child models.</summary>
         public static void CallEventAll(IModel model, string eventName, object[] arguments = null)
@@ -92,19 +109,8 @@ namespace UnitTests
             ReflectionUtilities.SetValueOfFieldOrProperty(linkFieldName, model, linkFieldValue);
         }
 
-
         /// <summary>Convert a SQLite table to a string.</summary>
-        public static string TableToString(string fileName, string tableName, IEnumerable<string> fieldNames = null)
-        {
-            SQLite database = new SQLite();
-            database.OpenDatabase(fileName, true);
-            var st = TableToString(database, tableName, fieldNames);
-            database.CloseDatabase();
-            return st;
-        }
-
-        /// <summary>Convert a SQLite table to a string.</summary>
-        public static string TableToString(IDatabaseConnection database, string tableName, IEnumerable<string> fieldNames = null)
+        public static DataTable GetTableFromDatabase(IDatabaseConnection database, string tableName, IEnumerable<string> fieldNames = null)
         {
             string sql = "SELECT ";
             if (fieldNames == null)
@@ -131,23 +137,7 @@ namespace UnitTests
                 orderByFieldNames.Add("[Clock.Today]");
             if (orderByFieldNames.Count > 0)
                 sql += " ORDER BY " + StringUtilities.BuildString(orderByFieldNames.ToArray(), ",");
-            DataTable data = database.ExecuteQuery(sql);
-            return TableToString(data);
-        }
-
-        /// <summary>Convert a SQLite query to a string.</summary>
-        public static string TableToStringUsingSQL(IDatabaseConnection database, string sql)
-        {
-            var data = database.ExecuteQuery(sql);
-            return TableToString(data);
-        }
-
-        /// <summary>Convert a DataTable to a string.</summary>
-        public static string TableToString(DataTable data)
-        {
-            StringWriter writer = new StringWriter();
-            DataTableUtilities.DataTableToText(data, 0, ",", true, writer);
-            return writer.ToString();
+            return database.ExecuteQuery(sql);
         }
 
         /// <summary>
@@ -166,29 +156,40 @@ namespace UnitTests
 
         public static string RunModels(string arguments)
         {
-            string pathToModels = typeof(IModel).Assembly.Location;
+            return RunModels(StringUtilities.SplitStringHonouringQuotes(arguments, " ").Cast<string>().ToArray());
+        }
 
-            ProcessUtilities.ProcessWithRedirectedOutput proc = new ProcessUtilities.ProcessWithRedirectedOutput();
-            proc.Start(pathToModels, arguments, Path.GetTempPath(), true);
-            proc.WaitForExit();
+        public static string RunModels(string[] arguments)
+        {
+            TextWriter stdout = Console.Out;
 
-            if (proc.ExitCode != 0)
-                throw new Exception(proc.StdOut);
-
-            return proc.StdOut;
+            try
+            {
+                StringWriter output = new StringWriter();
+                Console.SetOut(output);
+                Console.SetError(output);
+                int exitCode = Models.Program.Main(arguments);
+                if (exitCode != 0)
+                    throw new Exception($"Models invocation failed. Output:\n{output.ToString()}");
+                return output.ToString();
+            }
+            finally
+            {
+                Console.SetOut(stdout);
+            }
         }
 
         /// <summary>
         /// Returns a lightweight skeleton simulation which can be run.
         /// </summary>
-        public static Simulations GetRunnableSim()
+        public static Simulations GetRunnableSim(bool useInMemoryDb = false)
         {
             Simulations sims = new Simulations()
             {
                 FileName = Path.ChangeExtension(Path.GetTempFileName(), ".apsimx"),
                 Children = new List<IModel>()
                 {
-                    new DataStore(),
+                    new DataStore() { UseInMemoryDB = useInMemoryDb },
                     new Simulation()
                     {
                         Children = new List<IModel>()
@@ -228,17 +229,13 @@ namespace UnitTests
 
         public static Simulations GetSimpleExperiment()
         {
-            Simulations result = ReadFromResource<Simulations>("UnitTests.Resources.SimpleExperiment.apsimx", out List<Exception> errors);
-            if (errors != null && errors.Count > 0)
-                throw errors[0];
-
-            return result;
+            return ReadFromResource<Simulations>("UnitTests.Resources.SimpleExperiment.apsimx", e => throw e);
         }
 
-        public static T ReadFromResource<T>(string resourceName, out List<Exception> creationExceptions) where T : IModel
+        public static T ReadFromResource<T>(string resourceName, Action<Exception> errorHandler) where T : IModel
         {
             string json = ReflectionUtilities.GetResourceAsString(resourceName);
-            return FileFormat.ReadFromString<T>(json, out creationExceptions);
+            return (T)FileFormat.ReadFromString<T>(json, errorHandler, false).NewModel;
         }
 
         /// <summary>
@@ -250,6 +247,50 @@ namespace UnitTests
             model.OnCreated();
             foreach (var child in model.Children)
                 CallOnCreated(child);
+        }
+
+
+        public static DataTable CreateTable(IEnumerable<string> columnNames, IEnumerable<object[]> rows)
+        {
+            var data2 = new DataTable();
+            foreach (var columnName in columnNames)
+                data2.Columns.Add(columnName);
+
+            foreach (var row in rows)
+            {
+                var newRow = data2.NewRow();
+                newRow.ItemArray = row;
+                data2.Rows.Add(newRow);
+            }
+            return data2;
+        }
+
+        public static bool IsSame(this DataTable t1, DataTable t2)
+        {
+            if (t1 == null)
+                return false;
+            if (t2 == null)
+                return false;
+            if (t1.Rows.Count != t2.Rows.Count)
+                return false;
+
+            if (t1.Columns.Count != t2.Columns.Count)
+                return false;
+
+            if (t1.Columns.Cast<DataColumn>().Any(dc => !t2.Columns.Contains(dc.ColumnName)))
+            {
+                return false;
+            }
+
+            for (int i = 0; i <= t1.Rows.Count - 1; i++)
+            {
+                if (t1.Columns.Cast<DataColumn>().Any(dc1 => t1.Rows[i][dc1.ColumnName].ToString() != t2.Rows[i][dc1.ColumnName].ToString()))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 }

@@ -1,13 +1,10 @@
-﻿namespace Models.Storage
+﻿using System.Data;
+using System.IO;
+using System.Threading;
+using APSIM.Shared.JobRunning;
+
+namespace Models.Storage
 {
-    using APSIM.Shared.JobRunning;
-    using APSIM.Shared.Utilities;
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.IO;
-    using System.Reflection;
-    using System.Threading;
 
     /// <summary>Encapsulates a command to revert from a checkpoint.</summary>
     class RevertCheckpointCommand : IRunnable
@@ -25,11 +22,19 @@
         /// <summary>Constructor</summary>
         /// <param name="dataStoreWriter">The datastore writer that called this constructor.</param>
         /// <param name="checkpointID">The new checkpoint name to create.</param>
-        public RevertCheckpointCommand(DataStoreWriter dataStoreWriter, 
+        public RevertCheckpointCommand(DataStoreWriter dataStoreWriter,
                                        int checkpointID)
         {
             writer = dataStoreWriter;
             checkpointIDToRevertTo = checkpointID;
+        }
+
+        /// <summary>
+        /// Prepare the job for running.
+        /// </summary>
+        public void Prepare()
+        {
+            // Do nothing.
         }
 
         /// <summary>Called to run the command. Can throw on error.</summary>
@@ -75,6 +80,14 @@
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Cleanup the job after running it.
+        /// </summary>
+        public void Cleanup(System.Threading.CancellationTokenSource cancelToken)
+        {
+            // Do nothing.
         }
     }
 }
