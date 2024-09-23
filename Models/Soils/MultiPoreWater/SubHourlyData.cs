@@ -21,8 +21,6 @@ namespace Models.Soils
             Rainfall = new double[10];
             Drainage = new double[10];
             Infiltration = new double[10];
-            LeachNO3 = new double[10];
-            LeachUrea = new double[10];
         }
     }
 }
