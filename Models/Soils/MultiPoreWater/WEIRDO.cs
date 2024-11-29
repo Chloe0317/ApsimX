@@ -21,120 +21,156 @@ namespace Models.Soils
     [ValidParent(ParentType = typeof(Soil))]
     public class WEIRDO : Model, ISoilWater
     {
+        private Physical soilPhysical;
+
         #region IsoilInterface
         /// <summary> The amount of rainfall intercepted by crop and residue canopies </summary>
         public double PrecipitationInterception { get; set; }
-        ///<summary> This doesn't do anything currently</summary>
+        // This doesn't do anything currently
+        ///<summary> This is set by Microclimate and is rainfall less that intercepted by the canopy and residue components</summary>
         [JsonIgnore]
         public double PotentialInfiltration { get; set; }
-        ///<summary> Model name</summary>
+
+        ///<summary>Model name</summary>
         [JsonIgnore]
         public string WaterModelName { get { return this.Name; } }
+
         /// <summary>The amount of rainfall intercepted by surface residues</summary>
         [JsonIgnore]
         public double ResidueInterception { get { return ResidueWater; } set { } }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Catchment area for lateral flow calculations (m²)</summary>
         [JsonIgnore]
-        public double catchment_area { get; set; }
-        ///<summary> Who knows</summary>
+        public double CatchmentArea { get; set; }
+
+        /// <summary>Runoff Curve Number (CN) for bare soil with average moisture</summary>
         [JsonIgnore]
         public double CN2Bare { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Cover for max curve number reduction</summary>
         [JsonIgnore]
         public double CNCov { get; set; }
 
-        ///<summary> Who knows</summary>
+        /// <summary>Max. reduction in curve number due to cover</summary>
         [JsonIgnore]
         public double CNRed { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Constant in the soil water diffusivity calculation (mm²/day)</summary>
         [JsonIgnore]
         public double DiffusConst { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Effect of soil water storage above the lower limit on soil water diffusivity (/mm)</summary>
         [JsonIgnore]
         public double DiffusSlope { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Basal width of the downslope boundary of the catchment for lateral flow calculations (m)</summary>
         [JsonIgnore]
-        public double discharge_width { get; set; }
-        ///<summary> Who knows</summary>
+        public double DischargeWidth { get; set; }
+
+        /// <summary>Soil layer thickness (mm)</summary>
         [JsonIgnore]
         public double[] dlayer { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Change in soil water content (mm)</summary>
         [JsonIgnore]
         public double[] dlt_sw { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Change in soil water storage (mm)</summary>
         [JsonIgnore]
         public double[] dlt_sw_dep { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Drainage (mm)</summary>
         [JsonIgnore]
         public double Drainage { get; set; }
+
         /// <summary>Subsurface drain (mm)</summary>
         [JsonIgnore]
         public double SubsurfaceDrain { get; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Drainable upper limit (DUL) soil water content (mm)</summary>
         [JsonIgnore]
         public double[] DULmm { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Potential evapotranspiration from soil surface (mm)</summary>
         [JsonIgnore]
         public double Eo { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Potential evaporation from soil surface (mm)</summary>
         [JsonIgnore]
         public double Eos { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Actual soil water evaporation (mm)</summary>
         [JsonIgnore]
         public double Es { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Extractable soil water (mm)</summary>
         [JsonIgnore]
         public double[] ESW { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Water flux moving upward (mm)</summary>
         [JsonIgnore]
         public double[] Flow { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of ammonium (NH₄) leaching from each soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double[] FlowNH4 { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of nitrate (NO₃) leaching from each soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double[] FlowNO3 { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of urea leaching from each soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double[] FlowUrea { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of chloride (Cl) leaching from each soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double[] FlowCl { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Flux of water moving downward (mm)</summary>
         [JsonIgnore]
         public double[] Flux { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Gravitational gradient</summary>
         [JsonIgnore]
         public double gravity_gradient { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Infiltration (mm)</summary>
         [JsonIgnore]
         public double Infiltration { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Lateral saturated hydraulic conductivity (mm/day)</summary>
         [JsonIgnore]
         public double[] KLAT { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of ammonium (NH₄) leaching from the deepest soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double LeachNH4 { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of nitrate (NO₃) leaching from the deepest soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double LeachNO3 { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Amount of urea leaching from the deepest soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double LeachUrea { get; set; }
 
-        /// <summary>Amount of Cl leaching from the deepest soil layer (kg /ha)</summary>
+        /// <summary>Amount of chloride (Cl) leaching from the deepest soil layer (kg/ha)</summary>
         [JsonIgnore]
         public double LeachCl { get; set; }
 
-        ///<summary> Who knows</summary>
+        /// <summary>Lower limit of soil water content (mm)</summary>
         [JsonIgnore]
         public double[] LL15mm { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Maximum ponding (mm)</summary>
         [JsonIgnore]
         public double max_pond { get; set; }
-        ///<summary> Who knows</summary>
+
+        /// <summary>Water moving laterally out of the profile (mm)</summary>
         [JsonIgnore]
         public double[] LateralOutflow { get; set; }
+
         /// <summary> The Plant available water content of the soil layer /// </summary>
         [JsonIgnore]
         [Units("mm/mm")]
