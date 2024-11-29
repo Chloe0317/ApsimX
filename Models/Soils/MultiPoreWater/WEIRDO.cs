@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using APSIM.Shared.APSoil;
 using APSIM.Shared.Utilities;
@@ -6,7 +8,9 @@ using Models.Climate;
 using Models.Core;
 using Models.Interfaces;
 using Models.PMF;
+using Models.Soils;
 using Models.Surface;
+using Models.Utilities;
 using Newtonsoft.Json;
 
 namespace Models.Soils
@@ -85,9 +89,7 @@ namespace Models.Soils
         /// <summary>Subsurface drain (mm)</summary>
         [JsonIgnore]
         public double SubsurfaceDrain { get; }
-        /// <summary>Provides access to the soil properties.</summary>
-        [JsonIgnore]
-        public Soil Properties { get { return soil; } }
+
 
         /// <summary>Drainable upper limit (DUL) soil water content (mm)</summary>
         [JsonIgnore]
@@ -180,7 +182,7 @@ namespace Models.Soils
         {
             get
             {
-                return physical.PAWC;
+                return APSoilUtilities.CalcPAWC(soilPhysical.Thickness, soilPhysical.LL15, soilPhysical.DUL, null);
             }
         }
 
@@ -349,6 +351,7 @@ namespace Models.Soils
         public void Tillage(string DefaultTillageName) { }
         #endregion
 
+        
         #region Class Dependancy Links
 
         [Link]
@@ -367,12 +370,7 @@ namespace Models.Soils
         Plant Plant = null;
         /// <summary>Access the soil physical properties.</summary>
         [Link]
-        private IPhysical soilPhysical = null;
-        /// <summary>Link to the soil properties.</summary>
-        [Link]
-        private Soil soil = null;
-        [Link]
-        private Physical physical;
+        private Physical soilPhysical = null;
 
         #endregion
 
