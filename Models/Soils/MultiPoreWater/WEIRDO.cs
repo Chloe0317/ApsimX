@@ -21,7 +21,6 @@ namespace Models.Soils
     [ValidParent(ParentType = typeof(Soil))]
     public class WEIRDO : Model, ISoilWater
     {
-        private Physical soilPhysical;
 
         #region IsoilInterface
         /// <summary> The amount of rainfall intercepted by crop and residue canopies </summary>
