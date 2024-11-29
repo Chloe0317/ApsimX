@@ -85,6 +85,9 @@ namespace Models.Soils
         /// <summary>Subsurface drain (mm)</summary>
         [JsonIgnore]
         public double SubsurfaceDrain { get; }
+        /// <summary>Provides access to the soil properties.</summary>
+        [JsonIgnore]
+        public Soil Properties { get { return soil; } }
 
         /// <summary>Drainable upper limit (DUL) soil water content (mm)</summary>
         [JsonIgnore]
@@ -177,7 +180,7 @@ namespace Models.Soils
         {
             get
             {
-                return APSoilUtilities.CalcPAWC(soilPhysical.Thickness, soilPhysical.LL15, soilPhysical.DUL, null);
+                return physical.PAWC;
             }
         }
 
@@ -222,65 +225,79 @@ namespace Models.Soils
             }
         }
 
-        ///<summary> Who knows</summary>
+        ///<summary>Water stored in the surface pond (mm)</summary>
         [JsonIgnore]
         public double Pond { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Evaporation from the surface pond (mm)</summary>
         [JsonIgnore]
         public double pond_evap { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Runoff (mm)</summary>
         [JsonIgnore]
         public double Runoff { get; set; }
-        ///<summary>Soil Albedo</summary>
+
+        ///<summary>Fraction of incoming radiation reflected from bare soil</summary>
         [Units("0-1")]
         [Caption("Albedo")]
-        [Description("The proportion of incoming radiation that is reflected by the soil surface")]
+        [Description("Fraction of incoming radiation reflected from bare soil")]
         public double Salb { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Saturated water content in soil layers (mm)</summary>
         [JsonIgnore]
         public double[] SATmm { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Who knows</summary>
         [JsonIgnore]
         public double slope { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Who knows</summary>
         [JsonIgnore]
         public double[] solute_flow_eff { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Who knows</summary>
         [JsonIgnore]
         public double[] solute_flux_eff { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Bulk density of the soil (g/cm³)</summary>
         [JsonIgnore]
         public double specific_bd { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Drying coefficient for stage 2 soil water evaporation in summer (a.k.a. ConA)</summary>
         [JsonIgnore]
         public double SummerCona { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Start date for switch to summer parameters for soil water evaporation (dd-mmm)</summary>
         [JsonIgnore]
         public string SummerDate { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Cummulative soil water evaporation to reach the end of stage 1 soil water evaporation in summer (a.k.a. U)</summary>
         [JsonIgnore]
         public double SummerU { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Soil water content (mm/mm)</summary>
         [JsonIgnore]
         public double[] SW { get; set; }
-        ///<summary> Who knows</summary>
 
+        ///<summary>Drainable soil water content (fraction/day)</summary>
         public double[] SWCON { get; set; }
-        ///<summary> Who knows</summary>
+
+        ///<summary>Soil water content in each layer (mm)</summary>
         [JsonIgnore]
         public double[] SWmm { get; set; }
 
-        ///<summary> Who knows</summary>
+        ///<summary>Water potential of layer (cm)</summary>
         [JsonIgnore]
         public double[] PSI { get { throw new NotImplementedException(); } }
 
-        ///<summary> Who knows</summary>
+        ///<summary>Hydraulic Conductivity of layer (cm/h)</summary>
         [JsonIgnore]
         public double[] K { get { throw new NotImplementedException(); } }
 
-        ///<summary> Who knows</summary>
+        ///<summary>Pore Interaction Index for shape of the K(theta) curve for soil hydraulic conductivity</summary>
         [JsonIgnore]
         public double[] PoreInteractionIndex { get { throw new NotImplementedException(); } set { throw new NotImplementedException(); } }
+
 
         ///<summary> this is the layer structure that parameters are entered against for this object</summary>
         public double[] Thickness { get; set; }
@@ -348,8 +365,14 @@ namespace Models.Soils
         private IClock Clock = null;
         [Link(IsOptional = true)]
         Plant Plant = null;
+        /// <summary>Access the soil physical properties.</summary>
         [Link]
         private IPhysical soilPhysical = null;
+        /// <summary>Link to the soil properties.</summary>
+        [Link]
+        private Soil soil = null;
+        [Link]
+        private Physical physical;
 
         #endregion
 
