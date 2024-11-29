@@ -1,8 +1,5 @@
-﻿using Models.Core;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using System;
+using Models.Core;
 using Newtonsoft.Json;
 
 namespace Models.Soils
@@ -34,20 +31,6 @@ namespace Models.Soils
         [JsonIgnore]
         public double[] Infiltration { get; set; }
         /// <summary>
-        /// leaching of no3 occured
-        /// </summary>
-        [JsonIgnore]
-        public double[] LeachNO3 { get; set; }
-        /// <summary>
-        /// leaching of urea occured
-        /// </summary>
-        [JsonIgnore]
-        public double[] LeachUrea { get; set; }
-        /// <summary>
-        /// Initialise arays on construction
-        /// </summary>
-
-        /// <summary>
         /// Initialise arays on construction
         /// </summary>
         public HourlyData()
@@ -56,8 +39,6 @@ namespace Models.Soils
             Rainfall = new double[24];
             Drainage = new double[24];
             Infiltration = new double[24];
-            LeachNO3 = new double[24];
-            LeachUrea = new double[24];
         }
     }
 }
